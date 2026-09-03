@@ -18,6 +18,11 @@ The Vite development server proxies `/api` to `http://127.0.0.1:18767`. Set
 `REPLAY_BACKEND_URL` to use another backend. See [MIGRATION.md](./MIGRATION.md)
 for the capability map and migration order.
 
+Native ATIF live replay is served directly from immutable OSS chunks. Set
+`REPLAY_OSS_ENV_FILE` to an env file containing only the standard `OSS_*`
+settings (the production unit points at the Harness env file); credentials
+remain server-side.
+
 Production deployment on this host is managed by the user systemd service
 `replay-18768.service`:
 

@@ -1,4 +1,4 @@
-import type { AtifContent, AtifContentPart, AtifImageSource, AtifStep, AtifToolCall, AtifTrajectory } from './atif'
+import type { AtifContent, AtifImageSource, AtifStep, AtifToolCall, AtifTrajectory } from './atif'
 import { parseAtifTrajectory } from './atif'
 import type { Edit, Mutation, Step, StepImage } from './types'
 
@@ -30,11 +30,15 @@ function defaultImageUrl(source: AtifImageSource): string | undefined {
   return /^(data:|blob:|https?:)/.test(source.path) ? source.path : undefined
 }
 
+function record(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
 function replayTiming(step: AtifStep): { startMs?: number; endMs?: number } {
   const harness = step.extra?.osworld_harness
-  if (harness && typeof harness === 'object' && !Array.isArray(harness)) {
+  if (record(harness)) {
     const timing = harness.timing
-    if (timing && typeof timing === 'object' && !Array.isArray(timing)) {
+    if (record(timing)) {
       const startMs = typeof timing.start_ms === 'number' ? timing.start_ms : undefined
       const endMs = typeof timing.end_ms === 'number' ? timing.end_ms : undefined
       if (startMs != null || endMs != null) return { startMs, endMs }
@@ -43,7 +47,7 @@ function replayTiming(step: AtifStep): { startMs?: number; endMs?: number } {
   // Compatibility for trajectories produced by Replay before the namespace
   // contract was introduced.
   const replay = step.extra?.replay
-  if (!replay || typeof replay !== 'object' || Array.isArray(replay)) return {}
+  if (!record(replay)) return {}
   const startMs = typeof replay.start_ms === 'number' ? replay.start_ms : undefined
   const endMs = typeof replay.end_ms === 'number' ? replay.end_ms : undefined
   return { startMs, endMs }
@@ -107,11 +111,29 @@ function imageEntries(
  */
 export function atifTrajectoryToSteps(input: unknown, options: AtifViewerOptions = {}): Step[] {
   const trajectory: AtifTrajectory = parseAtifTrajectory(input, options.requireV18 ?? false)
-  const firstTimestamp = trajectory.steps
-    .map((step) => step.timestamp ? Date.parse(step.timestamp) : NaN)
+  const trajectories: AtifTrajectory[] = []
+  const visit = (document: AtifTrajectory) => {
+    trajectories.push(document)
+    for (const child of document.subagent_trajectories ?? []) visit(child)
+  }
+  visit(trajectory)
+  const entries = trajectories.flatMap((document, documentIndex) => document.steps.map((step) => ({
+    step,
+    order: documentIndex * 1_000_000 + step.step_id,
+  }))).sort((left, right) => {
+    const leftTiming = replayTiming(left.step).startMs
+    const rightTiming = replayTiming(right.step).startMs
+    const leftTimestamp = left.step.timestamp ? Date.parse(left.step.timestamp) : NaN
+    const rightTimestamp = right.step.timestamp ? Date.parse(right.step.timestamp) : NaN
+    const leftTime = leftTiming ?? (Number.isFinite(leftTimestamp) ? leftTimestamp : Number.POSITIVE_INFINITY)
+    const rightTime = rightTiming ?? (Number.isFinite(rightTimestamp) ? rightTimestamp : Number.POSITIVE_INFINITY)
+    return leftTime - rightTime || left.order - right.order
+  })
+  const firstTimestamp = entries
+    .map(({ step }) => step.timestamp ? Date.parse(step.timestamp) : NaN)
     .find(Number.isFinite)
 
-  return trajectory.steps.map((atifStep, index) => {
+  return entries.map(({ step: atifStep }, index) => {
     const timing = replayTiming(atifStep)
     const timestampMs = atifStep.timestamp ? Date.parse(atifStep.timestamp) : NaN
     const startMs = timing.startMs ?? (

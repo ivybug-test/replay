@@ -23,7 +23,9 @@ execution-state/v1 ────────────────────�
 - `src/lib/legacyTraceToAtif.ts` is the compatibility adapter for existing
   Harness traces. It emits ATIF v1.8 before any Viewer mapping occurs.
 - `/api/trajectory` returns a producer's native ATIF v1.8 document unchanged.
-  Replay falls back to `/api/agent-work` only when that endpoint returns 404.
+  While that terminal object is absent, `/api/atif-live` reads the ATIF stream
+  manifest and immutable chunks directly from OSS. Replay falls back to
+  `/api/agent-work` only when neither native ATIF source exists.
 - ATIF `ContentPart(type="image")` values in `message` and
   `observation.results[].content` carry LLM input/output images. Relative image
   paths are transported by `/api/atif-media`; they are not modeled as a Replay
@@ -41,6 +43,8 @@ execution-state/v1 ────────────────────�
   `ContentPart(type="image", source.path=...)` references to ZIP image bytes.
 - Agent messages, reasoning, tools, results, tokens, elapsed time and causal
   desktop screenshots are adapted to the film-style trajectory viewer.
+- Native ATIF live patches refresh every two seconds; terminal publication
+  automatically replaces the materialized live snapshot.
 - Screenshot bytes continue to come from the existing authenticated backend;
   they are not copied into localStorage.
 
@@ -60,7 +64,8 @@ execution-state/v1 ────────────────────�
 
 ## Boundaries
 
-- `/home/binqiu/oss-replay` remains unchanged during the bootstrap phase.
+- `/home/binqiu/oss-replay` remains unchanged during the bootstrap phase. The
+  new Replay server owns its native ATIF live-chunk reader.
 - Replay owns the new React user experience; OSS Replay remains the source of
   truth for catalog, traces, frames, reports, sessions and evidence.
 - The upstream `LICENSE`, attribution and source credits must be retained.

@@ -228,6 +228,7 @@ export default function TrajectoryViewer({
   const [speed, setSpeed] = useState(1)
   const [desktopCursorMs, setDesktopCursorMs] = useState(0)
   const desktopCursorRef = useRef(0)
+  const initializedReplayRef = useRef<string | undefined>()
   const timelineRef = useRef<ImperativePanelHandle>(null)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const toggleTimeline = () => {
@@ -269,11 +270,14 @@ export default function TrajectoryViewer({
 
   // Reset to the start when a different trajectory opens.
   useEffect(() => {
-    setActiveStep(0)
+    if (!loadedSteps.length || initializedReplayRef.current === replayKey) return
+    initializedReplayRef.current = replayKey
+    const firstFrameMs = desktopTimeline?.[0]?.atMs
+    const initialStep = firstFrameMs == null ? 0 : stepIndexAt(loadedSteps, firstFrameMs)
+    setActiveStep(initialStep)
     setPlaying(false)
-    const first = loadedSteps[0]
-    moveDesktopCursor(hasDesktopTimeline && first ? stepAnchorMs(first) : 0)
-  }, [replayKey, hasDesktopTimeline, loadedSteps, moveDesktopCursor])
+    moveDesktopCursor(firstFrameMs ?? stepAnchorMs(loadedSteps[initialStep]))
+  }, [replayKey, desktopTimeline, loadedSteps, moveDesktopCursor])
 
   useEffect(() => {
     stateRequestRef.current?.abort()

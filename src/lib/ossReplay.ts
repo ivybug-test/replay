@@ -1,5 +1,6 @@
 import { atifTrajectoryToSteps } from './atifToViewer'
 import { parseAtifTrajectory, type AtifTrajectory } from './atif'
+import { atifLiveToTrajectory, type AtifLiveStream } from './atifLive'
 import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
 import { parseOsworldAtifExtensions } from './osworldAtifExtra'
 import type { Agent, Run, RunStatus, Task, Vendor } from './types'
@@ -95,6 +96,7 @@ export interface ExecutionStateFeed {
 }
 
 const apiBase = String(import.meta.env.VITE_REPLAY_API_BASE ?? '').replace(/\/$/, '')
+const atifLiveCache = new Map<string, AtifLiveStream>()
 
 function apiPath(path: string): string {
   return `${apiBase}${path}`
@@ -111,6 +113,27 @@ async function getOptionalJson<T>(path: string, signal?: AbortSignal): Promise<T
   if (response.status === 404) return null
   if (!response.ok) throw new Error(`Replay API returned HTTP ${response.status}`)
   return response.json() as Promise<T>
+}
+
+async function getAtifLive(
+  batchId: string,
+  taskKey: string,
+  query: URLSearchParams,
+  signal?: AbortSignal,
+): Promise<AtifLiveStream | null> {
+  const key = `${batchId}/${taskKey}`
+  const prior = atifLiveCache.get(key)
+  const liveQuery = new URLSearchParams(query)
+  liveQuery.set('after', String(prior?.records.length ?? 0))
+  const delta = await getOptionalJson<AtifLiveStream>(`/api/atif-live?${liveQuery}`, signal)
+  if (!delta) return prior ?? null
+  const records = prior && delta.start_line === prior.records.length
+    ? [...prior.records, ...delta.records]
+    : delta.records
+  const complete = { ...delta, start_line: 0, records }
+  atifLiveCache.set(key, complete)
+  if (atifLiveCache.size > 8) atifLiveCache.delete(atifLiveCache.keys().next().value!)
+  return complete
 }
 
 export async function fetchLiveRuns(date?: string | null, signal?: AbortSignal) {
@@ -135,10 +158,18 @@ export async function fetchViewerBundle(
   const query = new URLSearchParams({ run: batchId, task: taskKey })
   const [batch, source, window] = await Promise.all([
     fetchBatch(batchId, signal),
-    getOptionalJson<AtifTrajectory>(`/api/trajectory?${query}`, signal).then(async (trajectory) => ({
-      trajectory,
-      work: trajectory ? null : await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal),
-    })),
+    getOptionalJson<AtifTrajectory>(`/api/trajectory?${query}`, signal).then(async (terminalTrajectory) => {
+      if (terminalTrajectory) {
+        atifLiveCache.delete(`${batchId}/${taskKey}`)
+        return { trajectory: terminalTrajectory, work: null }
+      }
+      const live = await getAtifLive(batchId, taskKey, query, signal)
+      const trajectory = live ? atifLiveToTrajectory(live) : null
+      return {
+        trajectory,
+        work: trajectory ? null : await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal),
+      }
+    }),
     getJson<TimelineWindow>(`/api/window?${query}&center_ms=0&before_ms=5000&after_ms=5000`, signal),
   ])
   const taskSummary = batch.tasks.find((task) => task.key === taskKey)
@@ -179,6 +210,7 @@ function toRunStatus(task: TaskSummary): RunStatus {
 }
 
 function durationSeconds(task: TaskSummary, fallbackMs: number): number {
+  if (Number.isFinite(fallbackMs) && fallbackMs > 0) return fallbackMs / 1000
   const started = task.started_at ? Date.parse(task.started_at) : NaN
   const finished = task.finished_at ? Date.parse(task.finished_at) : NaN
   return Number.isFinite(started) && Number.isFinite(finished)
@@ -238,6 +270,9 @@ function toViewerBundle(
   const artifacts = [...new Set(steps.flatMap((step) => (step.mutations ?? []).map((mutation) => mutation.target).filter(Boolean) as string[]))]
   const promptTokens = steps.reduce((sum, step) => sum + (step.tokens?.prompt ?? 0), 0)
   const completionTokens = steps.reduce((sum, step) => sum + (step.tokens?.completion ?? 0), 0)
+  const traceDurationMs = typeof extensions.harness?.run?.duration_ms === 'number'
+    ? extensions.harness.run.duration_ms
+    : work?.duration_ms ?? Math.max(0, ...steps.map((step) => (step.endSec ?? step.tSec ?? 0) * 1000))
 
   const vendor: Vendor = {
     id: 'oss-replay',
@@ -282,8 +317,8 @@ function toViewerBundle(
     reward: score,
     steps,
     stepCount: steps.length,
-    turns: steps.filter((step) => step.role === 'assistant').length,
-    durationSec: durationSeconds(taskSummary, work?.duration_ms ?? Math.max(0, ...steps.map((step) => (step.endSec ?? step.tSec ?? 0) * 1000))),
+    turns: steps.filter((step) => step.role === 'assistant' || step.role === 'agent').length,
+    durationSec: durationSeconds(taskSummary, traceDurationMs),
     artifacts,
     tokens: promptTokens || completionTokens ? { prompt: promptTokens, completion: completionTokens } : null,
     grade: score == null ? null : {

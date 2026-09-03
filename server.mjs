@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readAtifLive } from './server/atifLive.mjs'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const staticRoot = path.join(projectRoot, 'dist')
@@ -57,6 +58,10 @@ function sendText(response, status, text, contentType = 'text/plain; charset=utf
     'cache-control': 'no-store',
   })
   response.end(body)
+}
+
+function sendJson(response, status, value) {
+  sendText(response, status, `${JSON.stringify(value)}\n`, 'application/json; charset=utf-8')
 }
 
 function proxyApi(request, response) {
@@ -133,10 +138,26 @@ async function serveStatic(request, response, pathname) {
   else createReadStream(resolved.file).pipe(response)
 }
 
-const server = http.createServer((request, response) => {
+const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || '/', 'http://replay.local')
   if (url.pathname === '/healthz') {
     sendText(response, 200, 'ok\n')
+    return
+  }
+  if (url.pathname === '/api/atif-live') {
+    if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Method not allowed' })
+      return
+    }
+    try {
+      const after = Number(url.searchParams.get('after') || '0')
+      const result = await readAtifLive(
+        url.searchParams.get('run'), url.searchParams.get('task'), after,
+      )
+      sendJson(response, result.status, result.body)
+    } catch (error) {
+      sendJson(response, 502, { error: 'ATIF live stream unavailable', detail: error.message })
+    }
     return
   }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {

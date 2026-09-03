@@ -4,6 +4,8 @@ import { Loading } from '../components/ui'
 import { fetchExecutionState, fetchViewerBundle, type ViewerBundle } from '../lib/ossReplay'
 import TrajectoryViewer from './TrajectoryViewer'
 
+const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'interrupted', 'completed', 'error'])
+
 export default function LiveTrajectory() {
   const { batchId = '', taskKey = '' } = useParams()
   const [bundle, setBundle] = useState<ViewerBundle | null>(null)
@@ -15,12 +17,30 @@ export default function LiveTrajectory() {
 
   useEffect(() => {
     const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let hasBundle = false
     setBundle(null)
     setError(null)
-    fetchViewerBundle(batchId, taskKey, controller.signal)
-      .then(setBundle)
-      .catch((reason) => { if (!controller.signal.aborted) setError(String(reason)) })
-    return () => controller.abort()
+    const refresh = async () => {
+      try {
+        const next = await fetchViewerBundle(batchId, taskKey, controller.signal)
+        if (controller.signal.aborted) return
+        hasBundle = true
+        setBundle(next)
+        setError(null)
+        const status = String(next.task.metadata?.execution_status ?? '')
+        if (!TERMINAL_TASK_STATUSES.has(status)) timer = setTimeout(refresh, 2_000)
+      } catch (reason) {
+        if (controller.signal.aborted) return
+        if (!hasBundle) setError(String(reason))
+        timer = setTimeout(refresh, 2_000)
+      }
+    }
+    void refresh()
+    return () => {
+      controller.abort()
+      if (timer) clearTimeout(timer)
+    }
   }, [batchId, taskKey])
 
   if (error) return <div className="p-8 text-rose-400">Failed to prepare trajectory: {error}</div>
