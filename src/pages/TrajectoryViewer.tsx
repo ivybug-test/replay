@@ -182,6 +182,7 @@ interface TrajectoryViewerProps {
   vendorOverride?: Vendor
   desktopTimeline?: DesktopFrame[]
   executionState?: ExecutionStateFeed
+  loadExecutionState?: (signal?: AbortSignal) => Promise<ExecutionStateFeed>
   verifierLogOverride?: string | null
   backTo?: string
 }
@@ -192,7 +193,8 @@ export default function TrajectoryViewer({
   agentOverride,
   vendorOverride,
   desktopTimeline,
-  executionState,
+  executionState: initialExecutionState,
+  loadExecutionState,
   verifierLogOverride,
   backTo,
 }: TrajectoryViewerProps = {}) {
@@ -215,6 +217,10 @@ export default function TrajectoryViewer({
     return stepParam != null && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   })
   const [panel, setPanel] = useState<'step' | 'state' | 'artifacts' | 'analysis' | 'aft' | 'labels'>('step')
+  const [executionState, setExecutionState] = useState(initialExecutionState)
+  const [stateLoading, setStateLoading] = useState(false)
+  const [stateError, setStateError] = useState<string | null>(null)
+  const stateRequestRef = useRef<AbortController | null>(null)
   const [aftSteps, setAftSteps] = useState<Set<number>>(new Set())
   const [labels, setLabels] = useState<HumanLabel[]>([])
   const [noteDraft, setNoteDraft] = useState('')
@@ -256,6 +262,11 @@ export default function TrajectoryViewer({
     setActiveStep(stepIndexAt(loadedSteps, atMs))
   }, [loadedSteps, moveDesktopCursor])
 
+  const jumpToExecutionState = useCallback((atMs: number) => {
+    setPlaying(false)
+    seekDesktop(atMs)
+  }, [seekDesktop])
+
   // Reset to the start when a different trajectory opens.
   useEffect(() => {
     setActiveStep(0)
@@ -263,6 +274,33 @@ export default function TrajectoryViewer({
     const first = loadedSteps[0]
     moveDesktopCursor(hasDesktopTimeline && first ? stepAnchorMs(first) : 0)
   }, [replayKey, hasDesktopTimeline, loadedSteps, moveDesktopCursor])
+
+  useEffect(() => {
+    stateRequestRef.current?.abort()
+    stateRequestRef.current = null
+    setExecutionState(initialExecutionState)
+    setStateLoading(false)
+    setStateError(null)
+    return () => stateRequestRef.current?.abort()
+  }, [replayKey, initialExecutionState])
+
+  const selectPanel = useCallback((nextPanel: typeof panel) => {
+    setPanel(nextPanel)
+    if (nextPanel !== 'state' || executionState || stateLoading || !loadExecutionState) return
+    const controller = new AbortController()
+    stateRequestRef.current = controller
+    setStateLoading(true)
+    setStateError(null)
+    loadExecutionState(controller.signal)
+      .then(setExecutionState)
+      .catch((reason) => {
+        if (!controller.signal.aborted) setStateError(String(reason))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setStateLoading(false)
+        if (stateRequestRef.current === controller) stateRequestRef.current = null
+      })
+  }, [executionState, loadExecutionState, stateLoading])
 
   useEffect(() => {
     if (stepParam == null) return
@@ -523,11 +561,11 @@ export default function TrajectoryViewer({
               ['artifacts', `Changes${run.artifacts?.length ? ` (${run.artifacts.length})` : ''}`],
               ['aft', 'AFT'],
               ['labels', 'Label/Note'],
-            ] as const).filter(([p]) => p !== 'state' || !!executionState?.events.length).map(([p, lbl]) => (
+            ] as const).filter(([p]) => p !== 'state' || !!executionState?.events.length || !!loadExecutionState).map(([p, lbl]) => (
               <button
                 key={p}
                 data-tour={`tab-${p}`}
-                onClick={() => setPanel(p)}
+                onClick={() => selectPanel(p)}
                 title={lbl}
                 className={clsx(
                   'flex-1 px-1.5 py-2.5 text-center text-[11px] font-medium leading-tight transition-colors',
@@ -541,11 +579,18 @@ export default function TrajectoryViewer({
           <div data-tour="rail-content" className="flex-1 overflow-y-auto p-4">
             {panel === 'step' ? (
               <StepPanel step={step} />
+            ) : panel === 'state' && stateLoading ? (
+              <Loading label="Loading execution state…" />
+            ) : panel === 'state' && stateError ? (
+              <div className="space-y-3 text-sm text-rose-400">
+                <p>Failed to load execution state: {stateError}</p>
+                <button className="btn-ghost" onClick={() => { setStateError(null); selectPanel('state') }}>Retry</button>
+              </div>
             ) : panel === 'state' && executionState ? (
               <ExecutionStatePanel
                 feed={executionState}
-                playheadMs={hasDesktopTimeline ? desktopCursorMs : (step.tSec ?? 0) * 1000}
-                onJump={(atMs) => { setPlaying(false); seekDesktop(atMs) }}
+                playheadMs={Math.floor((hasDesktopTimeline ? desktopCursorMs : (step.tSec ?? 0) * 1000) / 1000) * 1000}
+                onJump={jumpToExecutionState}
               />
             ) : panel === 'analysis' ? (
               <GradePanel grade={run.grade} failureReason={run.failureReason} verifierLog={verifierLog} />

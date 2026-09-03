@@ -117,7 +117,6 @@ export interface ViewerBundle {
   agent: Agent
   vendor: Vendor
   desktopTimeline: DesktopFrame[]
-  executionState: ExecutionStateFeed
 }
 
 export interface DesktopFrame {
@@ -185,15 +184,23 @@ export async function fetchViewerBundle(
   signal?: AbortSignal,
 ): Promise<ViewerBundle> {
   const query = new URLSearchParams({ run: batchId, task: taskKey })
-  const [batch, work, window, executionState] = await Promise.all([
+  const [batch, work, window] = await Promise.all([
     fetchBatch(batchId, signal),
     getJson<EpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal),
     getJson<TimelineWindow>(`/api/window?${query}&center_ms=0&before_ms=5000&after_ms=5000`, signal),
-    getJson<ExecutionStateFeed>(`/api/execution-state?${query}`, signal),
   ])
   const taskSummary = batch.tasks.find((task) => task.key === taskKey)
   if (!taskSummary) throw new Error(`Task ${taskKey} is not present in ${batchId}.`)
-  return toViewerBundle(batch, taskSummary, work, window.timeline?.desktop ?? [], executionState)
+  return toViewerBundle(batch, taskSummary, work, window.timeline?.desktop ?? [])
+}
+
+export async function fetchExecutionState(
+  batchId: string,
+  taskKey: string,
+  signal?: AbortSignal,
+): Promise<ExecutionStateFeed> {
+  const query = new URLSearchParams({ run: batchId, task: taskKey })
+  return getJson<ExecutionStateFeed>(`/api/execution-state?${query}`, signal)
 }
 
 export function frameUrl(batchId: string, taskKey: string, frameIndex: number): string {
@@ -373,7 +380,6 @@ function toViewerBundle(
   taskSummary: TaskSummary,
   work: EpisodeWork,
   frames: TimelineStamp[],
-  executionState: ExecutionStateFeed,
 ): ViewerBundle {
   const configuration = batch.configuration ?? {}
   const agentLabel = work.agents.map((agent) => agent.label).join(', ') || String(configuration.orchestration ?? 'agent')
@@ -450,5 +456,5 @@ function toViewerBundle(
     },
     failureReason: taskSummary.error ?? null,
   }
-  return { task, run, agent, vendor, desktopTimeline, executionState }
+  return { task, run, agent, vendor, desktopTimeline }
 }

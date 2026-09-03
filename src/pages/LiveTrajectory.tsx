@@ -1,13 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loading } from '../components/ui'
-import { fetchViewerBundle, type ViewerBundle } from '../lib/ossReplay'
+import { fetchExecutionState, fetchViewerBundle, type ViewerBundle } from '../lib/ossReplay'
 import TrajectoryViewer from './TrajectoryViewer'
 
 export default function LiveTrajectory() {
   const { batchId = '', taskKey = '' } = useParams()
   const [bundle, setBundle] = useState<ViewerBundle | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const loadExecutionState = useCallback(
+    (signal?: AbortSignal) => fetchExecutionState(batchId, taskKey, signal),
+    [batchId, taskKey],
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -28,7 +32,7 @@ export default function LiveTrajectory() {
       agentOverride={bundle.agent}
       vendorOverride={bundle.vendor}
       desktopTimeline={bundle.desktopTimeline}
-      executionState={bundle.executionState}
+      loadExecutionState={loadExecutionState}
       backTo={`/live/runs/${encodeURIComponent(batchId)}`}
     />
   )
