@@ -5,6 +5,31 @@ the existing `/home/binqiu/oss-replay` service as its first backend. The goal is
 to migrate product capabilities without duplicating trajectory truth or OSS
 credentials in the browser.
 
+## Canonical trajectory boundary
+
+ATIF v1.8 is the only canonical trajectory model consumed by new Replay code:
+
+```text
+native Harness ATIF v1.8 ───────────────┐
+                                        ├─> ATIF validator ─> ATIF-to-Viewer ─> Run / Step UI
+legacy OSS Agent Work ─> compatibility ─┘
+
+desktop frames ───────────────────────────────────────────────────────────────> Desktop timeline
+execution-state/v1 ───────────────────────────────────────────────────────────> State panel
+```
+
+- `src/lib/atif.ts` defines and validates the Harbor ATIF contract.
+- `src/lib/atifToViewer.ts` is the sole canonical trajectory-to-UI projection.
+- `src/lib/legacyTraceToAtif.ts` is the compatibility adapter for existing
+  Harness traces. It emits ATIF v1.8 before any Viewer mapping occurs.
+- `/api/trajectory` returns a producer's native ATIF v1.8 document unchanged.
+  Replay falls back to `/api/agent-work` only when that endpoint returns 404.
+- ATIF `ContentPart(type="image")` values in `message` and
+  `observation.results[].content` carry LLM input/output images. Relative image
+  paths are transported by `/api/atif-media`; they are not modeled as a Replay
+  extension.
+- Desktop capture timing and `execution-state/v1` remain sidecars by design.
+
 ## Working now
 
 - ATIF viewer task/showcase/upload/AFT screens remain available.

@@ -1,4 +1,5 @@
 import { unzipSync, strFromU8 } from 'fflate'
+import { atifTrajectoryToSteps } from './atifToViewer'
 import type { Agent, Edit, FileKind, Mutation, Run, Step, Task, Vendor } from './types'
 
 // ---------------------------------------------------------------------------
@@ -107,54 +108,6 @@ function mutationsFor(toolCalls: any[] | undefined): Mutation[] {
 }
 
 // --- ATIF + messages step normalization ------------------------------------
-function splitAtifContent(content: any): [string | null, Array<{ path: string; mediaType?: string }>] {
-  if (typeof content === 'string' || content == null) return [content ?? null, []]
-  if (!Array.isArray(content)) return [JSON.stringify(content), []]
-  const texts: string[] = []
-  const images: Array<{ path: string; mediaType?: string }> = []
-  for (const part of content) {
-    if (typeof part === 'string') texts.push(part)
-    else if (part?.type === 'text' && typeof part.text === 'string') texts.push(part.text)
-    else if (part?.type === 'image' && typeof part.source?.path === 'string') {
-      images.push({ path: part.source.path, mediaType: part.source.media_type })
-    } else if (part?.type === 'image_url') {
-      const path = part.image_url?.url ?? part.image_url
-      if (typeof path === 'string') images.push({ path })
-    }
-  }
-  return [texts.join('\n') || null, images]
-}
-
-function normAtifStep(s: any, i: number, resolveAsset?: (path: string, mediaType?: string) => string | undefined): Step {
-  const tcs = (s.tool_calls ?? []).map((tc: any) => ({ name: tc.function_name ?? tc.function?.name ?? 'tool', args: clip(tc.arguments ?? tc.function?.arguments, 2000) }))
-  const [message, messageImages] = splitAtifContent(s.message)
-  const observationTexts: string[] = []
-  const observationImages: Array<{ path: string; mediaType?: string }> = []
-  if (Array.isArray(s.observation?.results)) {
-    for (const result of s.observation.results) {
-      const [text, images] = splitAtifContent(result.content)
-      if (text) observationTexts.push(text)
-      observationImages.push(...images)
-    }
-  } else if (s.observation != null) {
-    const [text, images] = splitAtifContent(s.observation)
-    if (text) observationTexts.push(text)
-    observationImages.push(...images)
-  }
-  const obs = observationTexts.join('\n\n') || null
-  const edits = editsFor(s.tool_calls, obs)
-  for (const image of [...messageImages, ...observationImages]) {
-    const url = resolveAsset?.(image.path, image.mediaType) ?? (/^(data:|blob:|https?:)/.test(image.path) ? image.path : undefined)
-    if (url) edits.push({ t: 'screenshot', url })
-  }
-  return {
-    index: i, role: s.source ?? 'agent', text: clip(message), reasoning: clip(s.reasoning_content, 3000),
-    toolCalls: tcs.length ? tcs : null, observation: clip(obs, 4000) ?? null,
-    tokens: s.metrics ? { prompt: s.metrics.prompt_tokens, completion: s.metrics.completion_tokens } : null,
-    timestamp: s.timestamp ?? null, mutations: mutationsFor(s.tool_calls).length ? mutationsFor(s.tool_calls) : null,
-    edits: edits.length ? edits : null,
-  }
-}
 function splitContent(c: any): [string | null, string[]] {
   if (typeof c === 'string' || c == null) return [c ?? null, []]
   if (Array.isArray(c)) {
@@ -205,10 +158,17 @@ function buildRun(d: any, taskId: string, agents: Map<string, Agent>, idHint: st
   const isAtif = typeof d.schema_version === 'string' && d.schema_version.startsWith('ATIF')
   const messages = d.transcript ?? d.messages
   let steps: Step[], harnessRaw: string | null = null, modelRaw: string | null = null
-  if (isAtif || Array.isArray(d.steps)) {
-    steps = (d.steps ?? []).map((s: any, i: number) => normAtifStep(s, i, meta.resolveAsset))
+  if (isAtif) {
+    steps = atifTrajectoryToSteps(d, {
+      requireV18: d.schema_version === 'ATIF-v1.8',
+      resolveImage: (source) => meta.resolveAsset?.(source.path, source.media_type),
+    })
     harnessRaw = d.agent?.name ?? null
     modelRaw = d.agent?.model_name ?? (d.steps ?? []).find((s: any) => s.model_name)?.model_name ?? null
+  } else if (Array.isArray(d.steps)) {
+    // Pre-ATIF uploads that merely used a `steps` array retain the permissive
+    // messages fallback; they are not accepted as native ATIF.
+    steps = normMessages(d.steps)
   } else {
     steps = normMessages(messages ?? [])
   }

@@ -1,4 +1,7 @@
-import type { Agent, Edit, Mutation, Run, RunStatus, Step, StepImage, Task, Vendor } from './types'
+import { atifTrajectoryToSteps } from './atifToViewer'
+import { parseAtifTrajectory, type AtifTrajectory } from './atif'
+import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
+import type { Agent, Run, RunStatus, Task, Vendor } from './types'
 
 export interface RunSummary {
   batch_id: string
@@ -32,72 +35,6 @@ export interface BatchDocument {
   finished_at?: string | null
   configuration?: Record<string, unknown>
   tasks: TaskSummary[]
-}
-
-interface MessageBlock {
-  type?: string
-  text?: string
-  thinking?: string
-  path?: string
-  sha256?: string
-  mimeType?: string
-  [key: string]: unknown
-}
-
-interface ModelImage {
-  path: string
-  sha256: string
-  mimeType?: string
-}
-
-interface WorkTool {
-  id: string
-  name: string
-  args?: unknown
-  result?: unknown
-  is_error: boolean | null
-  start_ms: number
-  end_ms: number | null
-}
-
-interface WorkItem {
-  id: string
-  agent_id: string
-  label: string
-  role?: string
-  origin?: string
-  start_ms: number
-  thinking_ms: number
-  ongoing: boolean
-  turn_num?: number
-  global_turn_num?: number
-  context_tokens?: number
-  model_inputs?: Array<{
-    request_index?: number
-    images?: ModelImage[]
-    new_images?: ModelImage[]
-    context_images?: ModelImage[]
-  }>
-  tools: WorkTool[]
-  message?: {
-    role: 'assistant' | 'user'
-    blocks: MessageBlock[]
-    usage?: Record<string, unknown>
-    error_message?: string
-  }
-  details: Array<
-    | { kind: 'thinking'; text: string }
-    | { kind: 'text'; text: string }
-    | { kind: 'tool'; tool_id: string }
-  >
-}
-
-interface EpisodeWork {
-  terminal: boolean
-  duration_ms: number
-  task_status?: string
-  agents: Array<{ id: string; label: string; role?: string; origin?: string }>
-  items: WorkItem[]
 }
 
 interface TimelineStamp {
@@ -164,6 +101,13 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function getOptionalJson<T>(path: string, signal?: AbortSignal): Promise<T | null> {
+  const response = await fetch(apiPath(path), { cache: 'no-store', signal })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`Replay API returned HTTP ${response.status}`)
+  return response.json() as Promise<T>
+}
+
 export async function fetchLiveRuns(date?: string | null, signal?: AbortSignal) {
   const query = new URLSearchParams()
   if (date) query.set('date', date)
@@ -184,14 +128,17 @@ export async function fetchViewerBundle(
   signal?: AbortSignal,
 ): Promise<ViewerBundle> {
   const query = new URLSearchParams({ run: batchId, task: taskKey })
-  const [batch, work, window] = await Promise.all([
+  const [batch, source, window] = await Promise.all([
     fetchBatch(batchId, signal),
-    getJson<EpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal),
+    getOptionalJson<AtifTrajectory>(`/api/trajectory?${query}`, signal).then(async (trajectory) => ({
+      trajectory,
+      work: trajectory ? null : await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal),
+    })),
     getJson<TimelineWindow>(`/api/window?${query}&center_ms=0&before_ms=5000&after_ms=5000`, signal),
   ])
   const taskSummary = batch.tasks.find((task) => task.key === taskKey)
   if (!taskSummary) throw new Error(`Task ${taskKey} is not present in ${batchId}.`)
-  return toViewerBundle(batch, taskSummary, work, window.timeline?.desktop ?? [])
+  return toViewerBundle(batch, taskSummary, source.work, source.trajectory, window.timeline?.desktop ?? [])
 }
 
 export async function fetchExecutionState(
@@ -208,155 +155,14 @@ export function frameUrl(batchId: string, taskKey: string, frameIndex: number): 
   return apiPath(`/api/frame?${query}`)
 }
 
-function modelImageUrl(batchId: string, taskKey: string, image: ModelImage): string {
+function modelImageUrl(batchId: string, taskKey: string, image: { path: string; sha256: string }): string {
   const query = new URLSearchParams({ run: batchId, task: taskKey, path: image.path, sha256: image.sha256 })
   return apiPath(`/api/model-image?${query}`)
 }
 
-function asText(value: unknown): string {
-  if (typeof value === 'string') return value
-  try { return JSON.stringify(value, null, 2) }
-  catch { return String(value) }
-}
-
-function computerEdit(tool: WorkTool): Edit | null {
-  if (!/computer|browser|pyautogui/i.test(tool.name)) return null
-  const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {}
-  const coordinate = args.coordinate ?? args.coord
-  const coord = Array.isArray(coordinate) && coordinate.length >= 2
-    ? [Number(coordinate[0]), Number(coordinate[1])] as [number, number]
-    : null
-  return {
-    t: 'computer',
-    action: typeof args.action === 'string' ? args.action : tool.name,
-    coord,
-    text: typeof args.text === 'string' ? args.text : null,
-  }
-}
-
-function imageRefs(value: unknown, depth = 0, budget = { remaining: 2048 }): ModelImage[] {
-  if (depth > 8 || value == null || budget.remaining <= 0) return []
-  budget.remaining -= 1
-  if (Array.isArray(value)) {
-    const found: ModelImage[] = []
-    for (const item of value) {
-      found.push(...imageRefs(item, depth + 1, budget))
-      if (found.length >= 32 || budget.remaining <= 0) break
-    }
-    return found.slice(0, 32)
-  }
-  if (typeof value !== 'object') return []
-  const object = value as Record<string, unknown>
-  const own = object.type === 'image' && typeof object.path === 'string' && typeof object.sha256 === 'string'
-    ? [{ path: object.path, sha256: object.sha256, mimeType: typeof object.mimeType === 'string' ? object.mimeType : undefined }]
-    : []
-  const found = [...own]
-  for (const item of Object.values(object)) {
-    found.push(...imageRefs(item, depth + 1, budget))
-    if (found.length >= 32 || budget.remaining <= 0) break
-  }
-  return found.slice(0, 32)
-}
-
-function workItemToStep(
-  item: WorkItem,
-  index: number,
-  batchId: string,
-  taskKey: string,
-): Step {
-  const blocks = item.message?.blocks ?? []
-  const messageText = blocks
-    .filter((block) => block.type === 'text' && block.text)
-    .map((block) => block.text)
-    .join('\n\n')
-  const detailText = item.details
-    .filter((detail) => detail.kind === 'text')
-    .map((detail) => detail.text)
-    .join('\n\n')
-  const thinking = item.details
-    .filter((detail) => detail.kind === 'thinking')
-    .map((detail) => detail.text)
-    .join('\n\n')
-  const toolCalls = item.tools.map((tool) => ({ name: tool.name, args: asText(tool.args) }))
-  const observations = item.tools
-    .filter((tool) => tool.result != null)
-    .map((tool) => `${tool.name}${tool.is_error ? ' (error)' : ''}\n${asText(tool.result)}`)
-  if (item.message?.error_message) observations.push(item.message.error_message)
-
-  const edits: Edit[] = item.tools.map(computerEdit).filter((edit): edit is Edit => edit != null)
-  const endMs = item.tools.reduce(
-    (latest, tool) => Math.max(latest, tool.end_ms ?? tool.start_ms),
-    item.start_ms + Math.max(0, item.thinking_ms),
-  )
-  const images: StepImage[] = []
-  const seenImages = new Set<string>()
-  const addImage = (image: ModelImage, kind: StepImage['kind'], source: StepImage['source'], label: string, atSec: number) => {
-    // The same model-input image can be referenced by multiple requests in one
-    // Agent Work. Show it once in the step while preserving repeated tool
-    // outputs, whose position and label carry separate meaning.
-    const key = kind === 'input' ? `${kind}:${image.sha256}` : `${kind}:${source}:${label}:${image.sha256}`
-    if (seenImages.has(key)) return
-    seenImages.add(key)
-    images.push({
-      url: modelImageUrl(batchId, taskKey, image),
-      kind,
-      source,
-      label,
-      mimeType: image.mimeType ?? null,
-      sha256: image.sha256,
-      atSec,
-    })
-  }
-
-  blocks
-    .filter((block): block is MessageBlock & ModelImage => block.type === 'image' && !!block.path && !!block.sha256)
-    .forEach((image) => addImage(
-      image,
-      item.message?.role === 'assistant' ? 'output' : 'input',
-      'message',
-      item.message?.role === 'assistant' ? 'Assistant message image' : 'User message attachment',
-      item.start_ms / 1000,
-    ))
-
-  for (const input of item.model_inputs ?? []) {
-    const request = input.request_index == null ? '' : ` #${input.request_index}`
-    for (const image of input.new_images ?? []) {
-      addImage(image, 'input', 'model', `Model input${request} · new`, item.start_ms / 1000)
-    }
-  }
-
-  for (const tool of item.tools) {
-    for (const image of imageRefs(tool.result)) {
-      addImage(image, 'output', 'tool', `${tool.name} result`, (tool.end_ms ?? tool.start_ms) / 1000)
-    }
-  }
-
-  const mutations: Mutation[] = item.tools.map((tool) => ({
-    kind: /write|edit|patch|file/i.test(tool.name) ? 'file' : 'command',
-    tool: tool.name,
-    target: undefined,
-    summary: tool.is_error ? 'tool failed' : tool.end_ms == null ? 'tool running' : 'tool completed',
-    detail: tool.result == null ? undefined : asText(tool.result),
-  }))
-  const usage = item.message?.usage ?? {}
-  const prompt = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined
-  const completion = typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined
-
-  return {
-    index,
-    role: item.message?.role === 'user' ? 'user' : 'assistant',
-    text: messageText || detailText || null,
-    reasoning: thinking ? `${item.label}\n\n${thinking}` : null,
-    toolCalls: toolCalls.length ? toolCalls : null,
-    observation: observations.length ? observations.join('\n\n') : null,
-    tokens: prompt != null || completion != null ? { prompt, completion } : null,
-    timestamp: null,
-    tSec: item.start_ms / 1000,
-    endSec: endMs / 1000,
-    images: images.length ? images : null,
-    mutations: mutations.length ? mutations : null,
-    edits: edits.length ? edits : null,
-  }
+function atifMediaUrl(batchId: string, taskKey: string, path: string): string {
+  const query = new URLSearchParams({ run: batchId, task: taskKey, path })
+  return apiPath(`/api/atif-media?${query}`)
 }
 
 function toRunStatus(task: TaskSummary): RunStatus {
@@ -378,16 +184,32 @@ function durationSeconds(task: TaskSummary, fallbackMs: number): number {
 function toViewerBundle(
   batch: BatchDocument,
   taskSummary: TaskSummary,
-  work: EpisodeWork,
+  work: LegacyEpisodeWork | null,
+  nativeTrajectory: AtifTrajectory | null,
   frames: TimelineStamp[],
 ): ViewerBundle {
   const configuration = batch.configuration ?? {}
-  const agentLabel = work.agents.map((agent) => agent.label).join(', ') || String(configuration.orchestration ?? 'agent')
-  const runtime = String(configuration.runtime_name ?? configuration.model ?? agentLabel)
+  const native = nativeTrajectory ? parseAtifTrajectory(nativeTrajectory, true) : null
+  const legacyAgentLabel = work?.agents.map((agent) => agent.label).join(', ')
+  const agentLabel = native?.agent.name ?? (legacyAgentLabel || String(configuration.orchestration ?? 'agent'))
+  const runtime = String(native?.agent.model_name ?? configuration.runtime_name ?? configuration.model ?? agentLabel)
   const taskId = `oss-${batch.batch_id}-${taskSummary.key}`
   const runId = `${taskId}-run`
   const agentId = `${taskId}-agent`
-  const steps = work.items.map((item, index) => workItemToStep(item, index, batch.batch_id, taskSummary.key))
+  const trajectory = native ?? (work?.items.length ? legacyTraceToAtif(work, {
+    sessionId: `${batch.batch_id}/${taskSummary.key}`,
+    trajectoryId: `${batch.batch_id}/${taskSummary.key}/root`,
+    agentName: String(configuration.orchestration ?? agentLabel),
+    agentVersion: typeof configuration.agent_version === 'string' ? configuration.agent_version : 'unknown',
+    modelName: runtime,
+    imageUrl: (image) => modelImageUrl(batch.batch_id, taskSummary.key, image),
+  }) : null)
+  const steps = trajectory ? atifTrajectoryToSteps(trajectory, {
+    requireV18: true,
+    resolveImage: (source) => /^(data:|blob:|https?:)/.test(source.path)
+      ? source.path
+      : atifMediaUrl(batch.batch_id, taskSummary.key, source.path),
+  }) : []
   const desktopTimeline = frames
     .filter((frame): frame is TimelineStamp & { frame_index: number } => typeof frame.frame_index === 'number')
     .map((frame) => ({
@@ -429,7 +251,7 @@ function toViewerBundle(
       execution_status: taskSummary.status,
       evaluation_status: taskSummary.evaluation_status,
       agent_outcome: taskSummary.agent_outcome,
-      agents: work.agents,
+      agents: work?.agents ?? [{ id: native?.trajectory_id ?? 'agent', label: native?.agent.name ?? agentLabel }],
     },
   }
   const score = typeof taskSummary.score === 'number' ? taskSummary.score : null
@@ -438,14 +260,14 @@ function toViewerBundle(
     taskId,
     agentId,
     vendorId: vendor.id,
-    format: 'harbor',
+    format: 'atif',
     status: toRunStatus(taskSummary),
     passed: score != null && score >= 0.999,
     reward: score,
     steps,
     stepCount: steps.length,
     turns: steps.filter((step) => step.role === 'assistant').length,
-    durationSec: durationSeconds(taskSummary, work.duration_ms),
+    durationSec: durationSeconds(taskSummary, work?.duration_ms ?? Math.max(0, ...steps.map((step) => (step.endSec ?? step.tSec ?? 0) * 1000))),
     artifacts,
     tokens: promptTokens || completionTokens ? { prompt: promptTokens, completion: completionTokens } : null,
     grade: score == null ? null : {
