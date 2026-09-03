@@ -7,13 +7,14 @@ import { Loading, Pill, StatCell, StatusBadge } from '../components/ui'
 import GradePanel from '../components/GradePanel'
 import Markdown from '../components/Markdown'
 import EnvironmentStage from '../components/EnvironmentStage'
+import ExecutionStatePanel from '../components/ExecutionStatePanel'
 import CodeBlock from '../components/CodeBlock'
 import { ArcGridView, tryParseArcGrids } from '../components/ArcGrid'
 import AftPanel from '../components/AftPanel'
 import type { AftReport } from '../lib/aft'
 import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, prettyModel } from '../lib/format'
 import { useDatasetStore, useLookups, useRunSteps } from '../lib/dataset'
-import type { DesktopFrame } from '../lib/ossReplay'
+import type { DesktopFrame, ExecutionStateFeed } from '../lib/ossReplay'
 import type { Agent, HumanLabel, LabelDecision, Mutation, Run, Step, StepImage, Task, Vendor } from '../lib/types'
 
 const MUT_STYLES: Record<Mutation['kind'], string> = {
@@ -180,6 +181,7 @@ interface TrajectoryViewerProps {
   agentOverride?: Agent
   vendorOverride?: Vendor
   desktopTimeline?: DesktopFrame[]
+  executionState?: ExecutionStateFeed
   verifierLogOverride?: string | null
   backTo?: string
 }
@@ -190,6 +192,7 @@ export default function TrajectoryViewer({
   agentOverride,
   vendorOverride,
   desktopTimeline,
+  executionState,
   verifierLogOverride,
   backTo,
 }: TrajectoryViewerProps = {}) {
@@ -211,7 +214,7 @@ export default function TrajectoryViewer({
     const n = Number(stepParam)
     return stepParam != null && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   })
-  const [panel, setPanel] = useState<'step' | 'artifacts' | 'analysis' | 'aft' | 'labels'>('step')
+  const [panel, setPanel] = useState<'step' | 'state' | 'artifacts' | 'analysis' | 'aft' | 'labels'>('step')
   const [aftSteps, setAftSteps] = useState<Set<number>>(new Set())
   const [labels, setLabels] = useState<HumanLabel[]>([])
   const [noteDraft, setNoteDraft] = useState('')
@@ -515,11 +518,12 @@ export default function TrajectoryViewer({
           <div data-tour="rail-tabs" className="flex border-b border-ink-700">
             {([
               ['step', 'Step'],
+              ['state', `State${executionState?.events.length ? ` (${executionState.events.length})` : ''}`],
               ['analysis', 'Reward & Verifier log'],
               ['artifacts', `Changes${run.artifacts?.length ? ` (${run.artifacts.length})` : ''}`],
               ['aft', 'AFT'],
               ['labels', 'Label/Note'],
-            ] as const).map(([p, lbl]) => (
+            ] as const).filter(([p]) => p !== 'state' || !!executionState?.events.length).map(([p, lbl]) => (
               <button
                 key={p}
                 data-tour={`tab-${p}`}
@@ -537,6 +541,12 @@ export default function TrajectoryViewer({
           <div data-tour="rail-content" className="flex-1 overflow-y-auto p-4">
             {panel === 'step' ? (
               <StepPanel step={step} />
+            ) : panel === 'state' && executionState ? (
+              <ExecutionStatePanel
+                feed={executionState}
+                playheadMs={hasDesktopTimeline ? desktopCursorMs : (step.tSec ?? 0) * 1000}
+                onJump={(atMs) => { setPlaying(false); seekDesktop(atMs) }}
+              />
             ) : panel === 'analysis' ? (
               <GradePanel grade={run.grade} failureReason={run.failureReason} verifierLog={verifierLog} />
             ) : panel === 'aft' ? (
