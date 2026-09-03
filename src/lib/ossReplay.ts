@@ -206,7 +206,7 @@ function toViewerBundle(
   }) : null)
   const steps = trajectory ? atifTrajectoryToSteps(trajectory, {
     requireV18: true,
-    resolveImage: (source) => /^(data:|blob:|https?:)/.test(source.path)
+    resolveImage: (source) => /^(data:|blob:|https?:|\/api\/)/.test(source.path)
       ? source.path
       : atifMediaUrl(batch.batch_id, taskSummary.key, source.path),
   }) : []
