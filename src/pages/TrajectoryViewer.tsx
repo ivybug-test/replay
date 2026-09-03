@@ -248,6 +248,11 @@ export default function TrajectoryViewer({
     if (hasDesktopTimeline && loadedSteps[next]) moveDesktopCursor(stepAnchorMs(loadedSteps[next]))
   }, [hasDesktopTimeline, loadedSteps, moveDesktopCursor])
 
+  const seekDesktop = useCallback((atMs: number) => {
+    moveDesktopCursor(atMs)
+    setActiveStep(stepIndexAt(loadedSteps, atMs))
+  }, [loadedSteps, moveDesktopCursor])
+
   // Reset to the start when a different trajectory opens.
   useEffect(() => {
     setActiveStep(0)
@@ -489,7 +494,7 @@ export default function TrajectoryViewer({
               cursorMs={desktopCursorMs}
               durationMs={timedDurationMs}
               step={step}
-              onSeek={(atMs) => { setPlaying(false); moveDesktopCursor(atMs) }}
+              onSeek={(atMs) => { setPlaying(false); seekDesktop(atMs) }}
             />
           )}
           <div className="min-h-0 flex-1">
