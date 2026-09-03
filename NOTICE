@@ -1,0 +1,8 @@
+Replay is derived from ATIF Trajectory Viewer:
+
+  Copyright 2026 Lin Shi (Slimshilin)
+  https://github.com/Slimshilin/ATIF-trajectory-viewer
+
+The upstream project and bundled sample datasets are distributed under the
+Apache License 2.0. Replay retains the upstream license and attribution while
+adding integration with the OSS Replay service.

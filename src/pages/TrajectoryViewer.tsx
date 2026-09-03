@@ -13,7 +13,7 @@ import AftPanel from '../components/AftPanel'
 import type { AftReport } from '../lib/aft'
 import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, prettyModel } from '../lib/format'
 import { useDatasetStore, useLookups, useRunSteps } from '../lib/dataset'
-import type { HumanLabel, LabelDecision, Mutation, Run, Step } from '../lib/types'
+import type { Agent, HumanLabel, LabelDecision, Mutation, Run, Step, Task, Vendor } from '../lib/types'
 
 const MUT_STYLES: Record<Mutation['kind'], string> = {
   file: 'bg-sky-500/15 text-sky-300',
@@ -143,15 +143,33 @@ function stepTitle(s: Step): string {
   return s.role
 }
 
-export default function TrajectoryViewer() {
+interface TrajectoryViewerProps {
+  taskOverride?: Task
+  runOverride?: Run
+  agentOverride?: Agent
+  vendorOverride?: Vendor
+  verifierLogOverride?: string | null
+  backTo?: string
+}
+
+export default function TrajectoryViewer({
+  taskOverride,
+  runOverride,
+  agentOverride,
+  vendorOverride,
+  verifierLogOverride,
+  backTo,
+}: TrajectoryViewerProps = {}) {
   const { taskId, runId } = useParams()
   const { data, error } = useDatasetStore()
   const lk = useLookups(data)
 
   // Trajectories are externalized to public/runs/<id>.json and lazy-loaded the
   // first time a run opens (inline for uploaded & tour runs).
-  const runForSteps = data?.runs.find((x) => x.id === runId)
-  const { steps: loadedSteps, verifierLog, error: stepsError } = useRunSteps(runForSteps)
+  const runForSteps = runOverride ?? data?.runs.find((x) => x.id === runId)
+  const { steps: loadedSteps, verifierLog: loadedVerifierLog, error: stepsError } = useRunSteps(runForSteps)
+  const verifierLog = verifierLogOverride ?? loadedVerifierLog
+  const replayKey = runOverride?.id ?? runId
 
   // Deep-link a step via ?step=N (used by the guided tour and shareable links).
   const [searchParams] = useSearchParams()
@@ -186,7 +204,7 @@ export default function TrajectoryViewer() {
   useEffect(() => {
     setActiveStep(0)
     setPlaying(false)
-  }, [runId])
+  }, [replayKey])
 
   const handleAftReport = useCallback((r: AftReport | null) => {
     const s = new Set<number>()
@@ -208,12 +226,14 @@ export default function TrajectoryViewer() {
     return () => clearTimeout(id)
   }, [playing, activeStep, speed, stepCount])
 
-  if (error) return <div className="p-8 text-rose-400">Failed to load dataset: {error}</div>
-  if (!data || !lk) return <Loading />
-  const task = lk.task(taskId!)
-  const run = lk.run(runId!)
+  if (!runOverride && error) return <div className="p-8 text-rose-400">Failed to load dataset: {error}</div>
+  if (!runOverride && (!data || !lk)) return <Loading />
+  const task = taskOverride ?? lk?.task(taskId!)
+  const run = runOverride ?? lk?.run(runId!)
   if (!task || !run) return <div className="p-8 text-zinc-400">Run not found.</div>
-  const agent = lk.agent(run.agentId)
+  const agent = agentOverride ?? lk?.agent(run.agentId)
+  const vendor = vendorOverride ?? lk?.vendor(run.vendorId)
+  const backHref = backTo ?? `/tasks/${task.id}`
 
   // The trajectory for this run is still being fetched from public/runs/<id>.json.
   if (run.stepCount > 0 && loadedSteps.length === 0) {
@@ -235,7 +255,7 @@ export default function TrajectoryViewer() {
             <>
               <Pill>{FORMAT_LABELS[run.format]}</Pill>
               <StatusBadge status={run.status} />
-              <Link to={`/tasks/${task.id}`} className="btn-ghost">← Task</Link>
+              <Link to={backHref} className="btn-ghost">← Task</Link>
             </>
           }
         />
@@ -287,7 +307,7 @@ export default function TrajectoryViewer() {
             <Pill>{FORMAT_LABELS[run.format]}</Pill>
             <span className="text-sm tabular-nums text-zinc-400">reward {fmtReward(run.reward)}</span>
             <StatusBadge status={run.status} />
-            <Link to={`/tasks/${task.id}`} className="btn-ghost">← Task</Link>
+            <Link to={backHref} className="btn-ghost">← Task</Link>
           </>
         }
       />
@@ -420,7 +440,7 @@ export default function TrajectoryViewer() {
                 run={erun}
                 task={task}
                 agent={agent}
-                vendor={lk.vendor(run.vendorId)}
+                vendor={vendor}
                 activeStep={activeStep}
                 onJumpToStep={(i) => { setPlaying(false); setActiveStep(i) }}
                 onReport={handleAftReport}

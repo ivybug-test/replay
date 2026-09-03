@@ -61,6 +61,9 @@ export const STATUS_STYLES: Record<string, string> = {
   failed: 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30',
   partial: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
   completed: 'bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30',
+  running: 'bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-500/30',
+  succeeded: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30',
+  interrupted: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
   error: 'bg-zinc-500/15 text-zinc-300 ring-1 ring-zinc-500/30',
 }
 

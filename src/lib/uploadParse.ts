@@ -107,19 +107,52 @@ function mutationsFor(toolCalls: any[] | undefined): Mutation[] {
 }
 
 // --- ATIF + messages step normalization ------------------------------------
-function normAtifStep(s: any, i: number): Step {
+function splitAtifContent(content: any): [string | null, Array<{ path: string; mediaType?: string }>] {
+  if (typeof content === 'string' || content == null) return [content ?? null, []]
+  if (!Array.isArray(content)) return [JSON.stringify(content), []]
+  const texts: string[] = []
+  const images: Array<{ path: string; mediaType?: string }> = []
+  for (const part of content) {
+    if (typeof part === 'string') texts.push(part)
+    else if (part?.type === 'text' && typeof part.text === 'string') texts.push(part.text)
+    else if (part?.type === 'image' && typeof part.source?.path === 'string') {
+      images.push({ path: part.source.path, mediaType: part.source.media_type })
+    } else if (part?.type === 'image_url') {
+      const path = part.image_url?.url ?? part.image_url
+      if (typeof path === 'string') images.push({ path })
+    }
+  }
+  return [texts.join('\n') || null, images]
+}
+
+function normAtifStep(s: any, i: number, resolveAsset?: (path: string, mediaType?: string) => string | undefined): Step {
   const tcs = (s.tool_calls ?? []).map((tc: any) => ({ name: tc.function_name ?? tc.function?.name ?? 'tool', args: clip(tc.arguments ?? tc.function?.arguments, 2000) }))
-  let obs: any = s.observation
-  if (obs && typeof obs === 'object') {
-    if (Array.isArray(obs.results)) obs = obs.results.map((r: any) => String(r.content ?? JSON.stringify(r))).join('\n\n')
-    else obs = JSON.stringify(obs)
+  const [message, messageImages] = splitAtifContent(s.message)
+  const observationTexts: string[] = []
+  const observationImages: Array<{ path: string; mediaType?: string }> = []
+  if (Array.isArray(s.observation?.results)) {
+    for (const result of s.observation.results) {
+      const [text, images] = splitAtifContent(result.content)
+      if (text) observationTexts.push(text)
+      observationImages.push(...images)
+    }
+  } else if (s.observation != null) {
+    const [text, images] = splitAtifContent(s.observation)
+    if (text) observationTexts.push(text)
+    observationImages.push(...images)
+  }
+  const obs = observationTexts.join('\n\n') || null
+  const edits = editsFor(s.tool_calls, obs)
+  for (const image of [...messageImages, ...observationImages]) {
+    const url = resolveAsset?.(image.path, image.mediaType) ?? (/^(data:|blob:|https?:)/.test(image.path) ? image.path : undefined)
+    if (url) edits.push({ t: 'screenshot', url })
   }
   return {
-    index: i, role: s.source ?? 'agent', text: clip(s.message), reasoning: clip(s.reasoning_content, 3000),
+    index: i, role: s.source ?? 'agent', text: clip(message), reasoning: clip(s.reasoning_content, 3000),
     toolCalls: tcs.length ? tcs : null, observation: clip(obs, 4000) ?? null,
     tokens: s.metrics ? { prompt: s.metrics.prompt_tokens, completion: s.metrics.completion_tokens } : null,
     timestamp: s.timestamp ?? null, mutations: mutationsFor(s.tool_calls).length ? mutationsFor(s.tool_calls) : null,
-    edits: editsFor(s.tool_calls, typeof obs === 'string' ? obs : null).length ? editsFor(s.tool_calls, typeof obs === 'string' ? obs : null) : null,
+    edits: edits.length ? edits : null,
   }
 }
 function splitContent(c: any): [string | null, string[]] {
@@ -128,7 +161,7 @@ function splitContent(c: any): [string | null, string[]] {
     const texts: string[] = [], imgs: string[] = []
     for (const it of c) {
       if (it?.type === 'text') texts.push(it.text ?? '')
-      else if (it?.type === 'image_url') { const u = it.image_url?.url ?? it.image_url; if (u && !String(u).startsWith('data:')) imgs.push(u) }
+      else if (it?.type === 'image_url') { const u = it.image_url?.url ?? it.image_url; if (u) imgs.push(u) }
       else if (typeof it === 'string') texts.push(it)
     }
     return [texts.join('\n') || null, imgs]
@@ -136,7 +169,7 @@ function splitContent(c: any): [string | null, string[]] {
   return [JSON.stringify(c), []]
 }
 function normMessages(messages: any[]): Step[] {
-  return messages.slice(0, 120).map((m, i) => {
+  return messages.map((m, i) => {
     const tcs = (m.tool_calls ?? []).map((tc: any) => ({ name: tc.function?.name ?? 'tool', args: clip(tc.function?.arguments, 1800) }))
     const [text, imgs] = splitContent(m.content)
     const edits = editsFor(m.tool_calls, m.role === 'tool' ? text : null)
@@ -159,6 +192,7 @@ interface RunMeta {
   durationSec?: number | null
   failureReason?: string | null
   idHint?: string
+  resolveAsset?: (path: string, mediaType?: string) => string | undefined
 }
 
 function isoDur(a?: string, b?: string): number | null {
@@ -172,7 +206,7 @@ function buildRun(d: any, taskId: string, agents: Map<string, Agent>, idHint: st
   const messages = d.transcript ?? d.messages
   let steps: Step[], harnessRaw: string | null = null, modelRaw: string | null = null
   if (isAtif || Array.isArray(d.steps)) {
-    steps = (d.steps ?? []).slice(0, 120).map((s: any, i: number) => normAtifStep(s, i))
+    steps = (d.steps ?? []).map((s: any, i: number) => normAtifStep(s, i, meta.resolveAsset))
     harnessRaw = d.agent?.name ?? null
     modelRaw = d.agent?.model_name ?? (d.steps ?? []).find((s: any) => s.model_name)?.model_name ?? null
   } else {
@@ -210,6 +244,25 @@ function buildRun(d: any, taskId: string, agents: Map<string, Agent>, idHint: st
 const dirOf = (p: string) => p.split('/').slice(0, -1).join('/')
 const baseOf = (p: string) => p.split('/').filter(Boolean).pop() ?? p
 
+function normalizeArchivePath(path: string): string {
+  const out: string[] = []
+  for (const part of path.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') out.pop()
+    else out.push(part)
+  }
+  return out.join('/')
+}
+
+function mimeFromPath(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase()
+  return ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+    : ext === 'gif' ? 'image/gif'
+      : ext === 'webp' ? 'image/webp'
+        : ext === 'svg' ? 'image/svg+xml'
+          : 'image/png'
+}
+
 export function parseUpload(buf: Uint8Array): ParsedUpload {
   const warnings: string[] = []
   // Allow large trajectory.json (agent logs can be tens of MB); cap others at 5MB.
@@ -224,6 +277,23 @@ export function parseUpload(buf: Uint8Array): ParsedUpload {
   }
   const paths = Object.keys(text)
   const readJson = (p: string): any => { try { return p in text ? JSON.parse(text[p]) : null } catch { return null } }
+  const assetUrls = new Map<string, string>()
+  const assetResolver = (trajectoryPath: string) => (ref: string, mediaType?: string): string | undefined => {
+    if (/^(data:|blob:|https?:)/.test(ref)) return ref
+    const normalizedRef = normalizeArchivePath(ref.replace(/^\/+/, ''))
+    const relative = normalizeArchivePath(`${dirOf(trajectoryPath)}/${ref}`)
+    const archivePath = [relative, normalizedRef].find((candidate) => candidate in files)
+      ?? Object.keys(files).find((candidate) => candidate.endsWith(`/${normalizedRef}`))
+    if (!archivePath) {
+      warnings.push(`image not found for ${trajectoryPath}: ${ref}`)
+      return undefined
+    }
+    const cached = assetUrls.get(archivePath)
+    if (cached) return cached
+    const url = URL.createObjectURL(new Blob([files[archivePath]], { type: mediaType ?? mimeFromPath(archivePath) }))
+    assetUrls.set(archivePath, url)
+    return url
+  }
 
   const agents = new Map<string, Agent>()
   const tasks: Task[] = []
@@ -281,6 +351,7 @@ export function parseUpload(buf: Uint8Array): ParsedUpload {
           summary: clip(stdout, 8000) ?? null,
           durationSec: dur,
           idHint: baseOf(J),
+          resolveAsset: assetResolver(`${J}/agent/trajectory.json`),
         }))
       } catch (e) { warnings.push(`skipped ${J}: ${e instanceof Error ? e.message : e}`) }
     }
@@ -294,7 +365,7 @@ export function parseUpload(buf: Uint8Array): ParsedUpload {
       if (/\/(config|result|debug_analysis|manifest)\.json$/i.test(p)) continue
       const d = readJson(p)
       if (!looksTraj(d)) continue
-      try { runs.push(buildRun(d, taskId, agents, baseOf(p).replace('.json', ''))) }
+      try { runs.push(buildRun(d, taskId, agents, baseOf(p).replace('.json', ''), { resolveAsset: assetResolver(p) })) }
       catch (e) { warnings.push(`skipped ${p}: ${e instanceof Error ? e.message : e}`) }
     }
   }
@@ -313,7 +384,7 @@ export function parseUpload(buf: Uint8Array): ParsedUpload {
         tasks.push({ id: taskId, vendorId: 'upload', title: 'Uploaded trajectories', source: 'harbor', category: 'Uploaded', difficulty: '', files: [], tier: 'example', metadata: {} })
         added = true
       }
-      try { runs.push(buildRun(d, taskId, agents, baseOf(p).replace('.json', ''))) } catch { /* skip */ }
+      try { runs.push(buildRun(d, taskId, agents, baseOf(p).replace('.json', ''), { resolveAsset: assetResolver(p) })) } catch { /* skip */ }
     }
   }
 

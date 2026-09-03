@@ -3,12 +3,13 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Rocket, FolderTree, Upload as UploadIcon, Sparkles,
-  PanelLeftClose, PanelLeftOpen, Compass, BarChart3, type LucideIcon,
+  PanelLeftClose, PanelLeftOpen, Compass, BarChart3, RadioTower, type LucideIcon,
 } from 'lucide-react'
 import { useDataset } from '../lib/dataset'
 import { startTour, buildTourSteps } from '../lib/tour'
 
 const nav: { to: string; label: string; Icon: LucideIcon; end?: boolean }[] = [
+  { to: '/live', label: 'OSS runs', Icon: RadioTower },
   { to: '/quickstart', label: 'Quick start', Icon: Rocket },
   { to: '/showcase', label: 'Feature showcase', Icon: Sparkles },
   { to: '/tasks', label: 'Tasks', Icon: FolderTree },
@@ -28,8 +29,8 @@ function BrandMark({ collapsed }: { collapsed: boolean }) {
       </div>
       {!collapsed && (
         <div className="leading-tight">
-          <div className="text-sm font-semibold text-white">ATIF</div>
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500">Trajectory Viewer</div>
+          <div className="text-sm font-semibold text-white">Replay</div>
+          <div className="text-[10px] uppercase tracking-widest text-zinc-500">Trajectory Workbench</div>
         </div>
       )}
     </div>
@@ -107,7 +108,7 @@ export default function Layout() {
                 Lin Shi (Slimshilin)
               </a>
             </div>
-            <div>ATIF Trajectory Viewer · Apache-2.0</div>
+            <div>Based on ATIF Trajectory Viewer · Apache-2.0</div>
           </div>
         )}
       </aside>

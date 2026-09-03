@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 export type RunFormat = 'atif' | 'snorkel' | 'harbor' | 'fleet'
-export type RunStatus = 'passed' | 'failed' | 'partial' | 'error' | 'completed'
+export type RunStatus = 'passed' | 'failed' | 'partial' | 'error' | 'completed' | 'running' | 'interrupted'
 export type StepRole = 'user' | 'agent' | 'assistant' | 'system' | 'tool'
 
 export interface Vendor {

@@ -1,4 +1,30 @@
-# ATIF Trajectory Viewer
+# Replay
+
+Replay is a new agent-trajectory workbench derived from ATIF Trajectory Viewer.
+It keeps the upstream task browser, film-style trajectory view, upload flow,
+specialized renderers and AFT panels, and adds a live integration with the
+existing OSS Replay backend in `/home/binqiu/oss-replay`.
+
+The first migration slice is available at `/live`: it lists real OSS runs,
+opens their tasks, loads the complete semantic Agent Work sequence, and shows
+causal desktop screenshots through the existing authenticated image API.
+
+```bash
+npm install
+npm run dev          # http://127.0.0.1:5174/live
+```
+
+The Vite development server proxies `/api` to `http://127.0.0.1:18767`. Set
+`REPLAY_BACKEND_URL` to use another backend. See [MIGRATION.md](./MIGRATION.md)
+for the capability map and migration order.
+
+## Upstream project
+
+The source below describes the original project on which Replay is based.
+Modified files are maintained by the Replay project; the original Apache-2.0
+license and attribution are retained in `LICENSE` and `NOTICE`.
+
+## ATIF Trajectory Viewer
 
 Built by [**Lin Shi** (Slimshilin)](https://github.com/Slimshilin) -- core
 contributor to [**Terminal-Bench**](https://www.tbench.ai/) and
