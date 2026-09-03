@@ -291,7 +291,10 @@ function workItemToStep(
   const images: StepImage[] = []
   const seenImages = new Set<string>()
   const addImage = (image: ModelImage, kind: StepImage['kind'], source: StepImage['source'], label: string, atSec: number) => {
-    const key = `${kind}:${source}:${label}:${image.sha256}`
+    // The same model-input image can be referenced by multiple requests in one
+    // Agent Work. Show it once in the step while preserving repeated tool
+    // outputs, whose position and label carry separate meaning.
+    const key = kind === 'input' ? `${kind}:${image.sha256}` : `${kind}:${source}:${label}:${image.sha256}`
     if (seenImages.has(key)) return
     seenImages.add(key)
     images.push({
@@ -317,11 +320,8 @@ function workItemToStep(
 
   for (const input of item.model_inputs ?? []) {
     const request = input.request_index == null ? '' : ` #${input.request_index}`
-    const classified = [...(input.new_images ?? []), ...(input.context_images ?? [])]
-    const candidates = classified.length ? classified : input.images ?? []
-    for (const image of candidates) {
-      const context = input.context_images?.some((candidate) => candidate.sha256 === image.sha256)
-      addImage(image, 'input', 'model', `Model input${request} · ${context ? 'context' : 'new'}`, item.start_ms / 1000)
+    for (const image of input.new_images ?? []) {
+      addImage(image, 'input', 'model', `Model input${request} · new`, item.start_ms / 1000)
     }
   }
 
