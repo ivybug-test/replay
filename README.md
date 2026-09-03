@@ -18,6 +18,13 @@ The Vite development server proxies `/api` to `http://127.0.0.1:18767`. Set
 `REPLAY_BACKEND_URL` to use another backend. See [MIGRATION.md](./MIGRATION.md)
 for the capability map and migration order.
 
+Production deployment on this host is managed by the user systemd service
+`replay-18768.service`:
+
+```bash
+npm run deploy        # build, restart, and verify http://127.0.0.1:18768/live
+```
+
 ## Upstream project
 
 The source below describes the original project on which Replay is based.

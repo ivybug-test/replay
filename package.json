@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "start": "node server.mjs",
+    "deploy": "./scripts/rebuild-and-restart.sh"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",

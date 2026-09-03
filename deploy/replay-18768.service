@@ -1,0 +1,19 @@
+[Unit]
+Description=Replay trajectory workbench on port 18768
+After=network-online.target oss-replay-18767.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/binqiu/replay
+ExecStart=/usr/bin/node /home/binqiu/replay/server.mjs
+Environment=NODE_ENV=production
+Environment=REPLAY_HOST=0.0.0.0
+Environment=REPLAY_PORT=18768
+Environment=REPLAY_BACKEND_URL=http://127.0.0.1:18767
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=default.target
