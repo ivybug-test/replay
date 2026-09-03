@@ -31,6 +31,17 @@ function defaultImageUrl(source: AtifImageSource): string | undefined {
 }
 
 function replayTiming(step: AtifStep): { startMs?: number; endMs?: number } {
+  const harness = step.extra?.osworld_harness
+  if (harness && typeof harness === 'object' && !Array.isArray(harness)) {
+    const timing = harness.timing
+    if (timing && typeof timing === 'object' && !Array.isArray(timing)) {
+      const startMs = typeof timing.start_ms === 'number' ? timing.start_ms : undefined
+      const endMs = typeof timing.end_ms === 'number' ? timing.end_ms : undefined
+      if (startMs != null || endMs != null) return { startMs, endMs }
+    }
+  }
+  // Compatibility for trajectories produced by Replay before the namespace
+  // contract was introduced.
   const replay = step.extra?.replay
   if (!replay || typeof replay !== 'object' || Array.isArray(replay)) return {}
   const startMs = typeof replay.start_ms === 'number' ? replay.start_ms : undefined
@@ -164,4 +175,3 @@ export function atifTrajectoryToSteps(input: unknown, options: AtifViewerOptions
     }
   })
 }
-

@@ -7,6 +7,7 @@ import type {
   AtifStep,
   AtifTrajectory,
 } from './atif'
+import { OSWORLD_HARNESS_SCHEMA } from './osworldAtifExtra'
 
 export interface LegacyModelImage {
   path: string
@@ -210,13 +211,12 @@ function modelInputStep(item: LegacyWorkItem, context: LegacyTraceContext): Omit
     source: 'system',
     message: parts,
     extra: {
-      replay: {
-        source: 'legacy_trace',
-        kind: 'model_input',
-        work_id: item.id,
-        agent_id: item.agent_id,
-        start_ms: item.start_ms,
-        end_ms: item.start_ms,
+      osworld_harness: {
+        timing: { clock: 'episode_elapsed_ms', start_ms: item.start_ms, end_ms: item.start_ms },
+        provenance: {
+          source_format: 'oss-agent-work', kind: 'model_input',
+          work_id: item.id, agent_id: item.agent_id,
+        },
       },
     },
   }
@@ -229,9 +229,10 @@ function workStep(item: LegacyWorkItem, context: LegacyTraceContext): Omit<AtifS
     function_name: tool.name,
     arguments: object(tool.args),
     extra: {
-      start_ms: tool.start_ms,
-      end_ms: tool.end_ms,
-      is_error: tool.is_error,
+      osworld_harness: {
+        actor: item.agent_id,
+        timing: { clock: 'episode_elapsed_ms', start_ms: tool.start_ms, end_ms: tool.end_ms },
+      },
     },
   }))
   const results: AtifObservationResult[] = item.tools
@@ -239,7 +240,11 @@ function workStep(item: LegacyWorkItem, context: LegacyTraceContext): Omit<AtifS
     .map((tool) => ({
       source_call_id: tool.id,
       content: resultContent(tool.result, context),
-      extra: { is_error: tool.is_error },
+      extra: {
+        osworld_harness: {
+          tool_status: tool.is_error === true ? 'error' : tool.is_error === false ? 'completed' : 'unknown',
+        },
+      },
     }))
   if (item.message?.error_message) results.push({ content: item.message.error_message })
   const isLlmStep = source === 'agent' && !!item.message
@@ -257,17 +262,14 @@ function workStep(item: LegacyWorkItem, context: LegacyTraceContext): Omit<AtifS
       llm_call_count: isLlmStep ? Math.max(1, item.model_inputs?.length ?? 0) : 0,
     } : {}),
     extra: {
-      replay: {
-        source: 'legacy_trace',
-        kind: 'agent_work',
-        work_id: item.id,
-        agent_id: item.agent_id,
-        role: item.role,
-        origin: item.origin,
-        turn_num: item.turn_num,
-        global_turn_num: item.global_turn_num,
-        start_ms: item.start_ms,
-        end_ms: workEnd(item),
+      osworld_harness: {
+        timing: { clock: 'episode_elapsed_ms', start_ms: item.start_ms, end_ms: workEnd(item) },
+        provenance: {
+          source_format: 'oss-agent-work', kind: 'agent_work',
+          work_id: item.id, agent_id: item.agent_id,
+          role: item.role, origin: item.origin,
+          turn_num: item.turn_num, global_turn_num: item.global_turn_num,
+        },
       },
     },
   }
@@ -295,7 +297,11 @@ export function legacyTraceToAtif(work: LegacyEpisodeWork, context: LegacyTraceC
       name: context.agentName,
       version: context.agentVersion ?? 'unknown',
       model_name: context.modelName,
-      extra: { source_format: 'oss-agent-work', adapter: 'legacy-trace-to-atif/v1' },
+      extra: {
+        osworld_harness: {
+          source_format: 'oss-agent-work', adapter: 'legacy-trace-to-atif/v1',
+        },
+      },
     },
     steps,
     notes: 'Converted from the legacy OSS Harness trace stream by Replay.',
@@ -307,7 +313,17 @@ export function legacyTraceToAtif(work: LegacyEpisodeWork, context: LegacyTraceC
       total_steps: steps.length,
       extra: { source_duration_ms: work.duration_ms },
     },
-    extra: { source_format: 'oss-agent-work', compatibility_adapter: 'v1' },
+    extra: {
+      osworld_harness: {
+        schema_version: OSWORLD_HARNESS_SCHEMA,
+        clock: { field: 'episode_elapsed_ms', unit: 'ms', origin: 'episode_start' },
+        source: { format: 'oss-agent-work', adapter: 'legacy-trace-to-atif/v1' },
+        run: {
+          duration_ms: work.duration_ms,
+          terminal: work.terminal,
+          execution_status: work.task_status,
+        },
+      },
+    },
   }
 }
-

@@ -1,6 +1,7 @@
 import { atifTrajectoryToSteps } from './atifToViewer'
 import { parseAtifTrajectory, type AtifTrajectory } from './atif'
 import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
+import { parseOsworldAtifExtensions } from './osworldAtifExtra'
 import type { Agent, Run, RunStatus, Task, Vendor } from './types'
 
 export interface RunSummary {
@@ -62,7 +63,9 @@ export interface DesktopFrame {
   url: string
 }
 
-export type ExecutionStateKind = 'declaration' | 'goal' | 'attempt' | 'evidence' | 'failure'
+export type ExecutionStateKind =
+  | 'declaration' | 'goal' | 'action' | 'checkpoint'
+  | 'attempt' | 'evidence' | 'failure' | 'recovery'
 
 export interface ExecutionStateEvent {
   sequence: number
@@ -87,6 +90,8 @@ export interface ExecutionStateFeed {
   duration_ms: number
   terminal: boolean
   task_status?: string | null
+  source?: 'trajectory_extra'
+  final_state?: Record<string, unknown>
 }
 
 const apiBase = String(import.meta.env.VITE_REPLAY_API_BASE ?? '').replace(/\/$/, '')
@@ -204,13 +209,14 @@ function toViewerBundle(
     modelName: runtime,
     imageUrl: (image) => modelImageUrl(batch.batch_id, taskSummary.key, image),
   }) : null)
+  const extensions = trajectory ? parseOsworldAtifExtensions(trajectory) : {}
   const steps = trajectory ? atifTrajectoryToSteps(trajectory, {
     requireV18: true,
     resolveImage: (source) => /^(data:|blob:|https?:|\/api\/)/.test(source.path)
       ? source.path
       : atifMediaUrl(batch.batch_id, taskSummary.key, source.path),
   }) : []
-  const desktopTimeline = frames
+  const sidecarDesktopTimeline = frames
     .filter((frame): frame is TimelineStamp & { frame_index: number } => typeof frame.frame_index === 'number')
     .map((frame) => ({
       atMs: frame.at_ms,
@@ -218,6 +224,16 @@ function toViewerBundle(
       url: frameUrl(batch.batch_id, taskSummary.key, frame.frame_index),
     }))
     .sort((a, b) => a.atMs - b.atMs)
+  const embeddedDesktopTimeline = (extensions.harness?.desktop_timeline?.frames ?? []).map((frame) => ({
+    atMs: frame.episode_elapsed_ms,
+    frameIndex: frame.frame_index,
+    url: /^(data:|blob:|https?:|\/api\/)/.test(frame.image.source.path)
+      ? frame.image.source.path
+      : atifMediaUrl(batch.batch_id, taskSummary.key, frame.image.source.path),
+  }))
+  // Existing trace sidecars remain authoritative while producers migrate.
+  // Native ATIF can become self-contained as soon as it embeds this extension.
+  const desktopTimeline = sidecarDesktopTimeline.length ? sidecarDesktopTimeline : embeddedDesktopTimeline
   const firstUserText = steps.find((step) => step.role === 'user' && step.text)?.text
   const artifacts = [...new Set(steps.flatMap((step) => (step.mutations ?? []).map((mutation) => mutation.target).filter(Boolean) as string[]))]
   const promptTokens = steps.reduce((sum, step) => sum + (step.tokens?.prompt ?? 0), 0)

@@ -8,18 +8,24 @@ const PAGE_SIZE = 40
 const FILTERS: Array<{ kind: Filter; label: string }> = [
   { kind: 'all', label: 'All' },
   { kind: 'goal', label: 'Goals' },
+  { kind: 'action', label: 'Actions' },
+  { kind: 'checkpoint', label: 'Checkpoints' },
   { kind: 'attempt', label: 'Attempts' },
   { kind: 'evidence', label: 'Evidence' },
   { kind: 'failure', label: 'Failures' },
+  { kind: 'recovery', label: 'Recovery' },
   { kind: 'declaration', label: 'Declarations' },
 ]
 
 const KIND_STYLE: Record<ExecutionStateKind, string> = {
   declaration: 'bg-zinc-500/15 text-zinc-300 ring-zinc-500/30',
   goal: 'bg-sky-500/15 text-sky-300 ring-sky-500/30',
+  action: 'bg-cyan-500/15 text-cyan-300 ring-cyan-500/30',
+  checkpoint: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
   attempt: 'bg-violet-500/15 text-violet-300 ring-violet-500/30',
   evidence: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
   failure: 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
+  recovery: 'bg-orange-500/15 text-orange-300 ring-orange-500/30',
 }
 
 function kindOf(event: ExecutionStateEvent): ExecutionStateKind {
@@ -77,7 +83,7 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
   }
 
   if (kind === 'goal') {
-    const goal = object(event.goal)
+    const goal = Object.keys(object(event.goal)).length ? object(event.goal) : object(event.record)
     return (
       <>
         <div className="flex flex-wrap gap-1.5">
@@ -110,8 +116,37 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
     )
   }
 
+  if (kind === 'action') {
+    const record = object(event.record)
+    return (
+      <>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge tone={record.tool_status === 'error' ? 'bg-rose-500/15 text-rose-300' : 'bg-cyan-500/15 text-cyan-300'}>{value(record.tool)} · {value(record.tool_status)}</Badge>
+          <Badge>{value(record.actor)}</Badge>
+        </div>
+        <div className="text-[10px] text-zinc-500"><code>{value(record.id)}</code></div>
+        <ReferenceList label="refs" values={[record.action_ref, record.result_ref].filter((item): item is string => typeof item === 'string')} />
+      </>
+    )
+  }
+
+  if (kind === 'checkpoint') {
+    const record = object(event.record)
+    return (
+      <>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge tone={record.status === 'complete' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}>{value(record.status)}</Badge>
+          <Badge>{value(record.trigger)}</Badge>
+          <Badge>{value(record.actor)}</Badge>
+        </div>
+        <div className="text-[10px] text-zinc-500"><code>{value(record.id)}</code></div>
+        <ReferenceList label="actions" values={list(record.action_ids)} />
+      </>
+    )
+  }
+
   if (kind === 'evidence') {
-    const window = object(event.window)
+    const window = Object.keys(object(event.window)).length ? object(event.window) : object(event.record)
     return (
       <>
         <div className="flex flex-wrap gap-1.5">
@@ -127,6 +162,21 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
         {window.response_excerpt && (
           <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-ink-950 p-2 text-[10px] leading-relaxed text-zinc-500">{String(window.response_excerpt)}</pre>
         )}
+      </>
+    )
+  }
+
+  if (kind === 'recovery') {
+    const record = object(event.record)
+    return (
+      <>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge tone="bg-orange-500/15 text-orange-300">{value(record.kind)}</Badge>
+          <Badge>{value(record.status)}</Badge>
+        </div>
+        <p className="text-sm leading-relaxed text-zinc-200">{value(record.intent ?? record.question)}</p>
+        <p className="text-xs leading-relaxed text-zinc-400"><span className="text-zinc-600">Different because: </span>{value(record.why_different)}</p>
+        <ReferenceList label="failures" values={list(record.failure_ids)} />
       </>
     )
   }
@@ -236,7 +286,7 @@ function ExecutionStatePanel({
             <h2 className="text-sm font-semibold text-zinc-100">Execution State</h2>
             <p className="mt-0.5 text-[10px] text-zinc-500">{feed.version} · {events.length} events · playhead {clock(playheadMs)}</p>
           </div>
-          <Badge tone="bg-emerald-500/15 text-emerald-300">trace-backed</Badge>
+          <Badge tone="bg-emerald-500/15 text-emerald-300">{feed.source === 'trajectory_extra' ? 'ATIF archive' : 'live trace'}</Badge>
         </div>
       </div>
 
