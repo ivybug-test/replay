@@ -150,12 +150,23 @@ server.listen(port, host, () => {
   console.log(`Replay listening on http://${host}:${port}; API backend ${backend.origin}`)
 })
 
+let shuttingDown = false
 function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  const forceExit = setTimeout(() => {
+    server.closeAllConnections?.()
+    process.exit(1)
+  }, 5000)
+  forceExit.unref()
+  server.closeIdleConnections?.()
   server.close((error) => {
+    clearTimeout(forceExit)
     if (error) {
       console.error(error)
-      process.exitCode = 1
+      process.exit(1)
     }
+    process.exit(0)
   })
 }
 
