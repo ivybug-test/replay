@@ -1,4 +1,4 @@
-import type { Agent, Edit, Mutation, Run, RunStatus, Step, Task, Vendor } from './types'
+import type { Agent, Edit, Mutation, Run, RunStatus, Step, StepImage, Task, Vendor } from './types'
 
 export interface RunSummary {
   batch_id: string
@@ -40,12 +40,14 @@ interface MessageBlock {
   thinking?: string
   path?: string
   sha256?: string
+  mimeType?: string
   [key: string]: unknown
 }
 
 interface ModelImage {
   path: string
   sha256: string
+  mimeType?: string
 }
 
 interface WorkTool {
@@ -71,6 +73,8 @@ interface WorkItem {
   global_turn_num?: number
   context_tokens?: number
   model_inputs?: Array<{
+    request_index?: number
+    images?: ModelImage[]
     new_images?: ModelImage[]
     context_images?: ModelImage[]
   }>
@@ -112,6 +116,13 @@ export interface ViewerBundle {
   run: Run
   agent: Agent
   vendor: Vendor
+  desktopTimeline: DesktopFrame[]
+}
+
+export interface DesktopFrame {
+  atMs: number
+  frameIndex: number
+  url: string
 }
 
 const apiBase = String(import.meta.env.VITE_REPLAY_API_BASE ?? '').replace(/\/$/, '')
@@ -172,15 +183,6 @@ function asText(value: unknown): string {
   catch { return String(value) }
 }
 
-function latestFrame(frames: TimelineStamp[], atMs: number): number | null {
-  let match: number | null = null
-  for (const frame of frames) {
-    if (frame.at_ms > atMs) break
-    if (typeof frame.frame_index === 'number') match = frame.frame_index
-  }
-  return match
-}
-
 function computerEdit(tool: WorkTool): Edit | null {
   if (!/computer|browser|pyautogui/i.test(tool.name)) return null
   const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {}
@@ -196,12 +198,35 @@ function computerEdit(tool: WorkTool): Edit | null {
   }
 }
 
+function imageRefs(value: unknown, depth = 0, budget = { remaining: 2048 }): ModelImage[] {
+  if (depth > 8 || value == null || budget.remaining <= 0) return []
+  budget.remaining -= 1
+  if (Array.isArray(value)) {
+    const found: ModelImage[] = []
+    for (const item of value) {
+      found.push(...imageRefs(item, depth + 1, budget))
+      if (found.length >= 32 || budget.remaining <= 0) break
+    }
+    return found.slice(0, 32)
+  }
+  if (typeof value !== 'object') return []
+  const object = value as Record<string, unknown>
+  const own = object.type === 'image' && typeof object.path === 'string' && typeof object.sha256 === 'string'
+    ? [{ path: object.path, sha256: object.sha256, mimeType: typeof object.mimeType === 'string' ? object.mimeType : undefined }]
+    : []
+  const found = [...own]
+  for (const item of Object.values(object)) {
+    found.push(...imageRefs(item, depth + 1, budget))
+    if (found.length >= 32 || budget.remaining <= 0) break
+  }
+  return found.slice(0, 32)
+}
+
 function workItemToStep(
   item: WorkItem,
   index: number,
   batchId: string,
   taskKey: string,
-  frames: TimelineStamp[],
 ): Step {
   const blocks = item.message?.blocks ?? []
   const messageText = blocks
@@ -223,13 +248,51 @@ function workItemToStep(
   if (item.message?.error_message) observations.push(item.message.error_message)
 
   const edits: Edit[] = item.tools.map(computerEdit).filter((edit): edit is Edit => edit != null)
-  const frame = latestFrame(frames, item.start_ms)
-  if (frame != null) {
-    edits.push({ t: 'screenshot', url: frameUrl(batchId, taskKey, frame) })
-  } else {
-    const image = item.model_inputs?.flatMap((input) => input.new_images ?? input.context_images ?? [])[0]
-      ?? blocks.find((block) => block.path && block.sha256) as ModelImage | undefined
-    if (image?.path && image.sha256) edits.push({ t: 'screenshot', url: modelImageUrl(batchId, taskKey, image) })
+  const endMs = item.tools.reduce(
+    (latest, tool) => Math.max(latest, tool.end_ms ?? tool.start_ms),
+    item.start_ms + Math.max(0, item.thinking_ms),
+  )
+  const images: StepImage[] = []
+  const seenImages = new Set<string>()
+  const addImage = (image: ModelImage, kind: StepImage['kind'], source: StepImage['source'], label: string, atSec: number) => {
+    const key = `${kind}:${source}:${label}:${image.sha256}`
+    if (seenImages.has(key)) return
+    seenImages.add(key)
+    images.push({
+      url: modelImageUrl(batchId, taskKey, image),
+      kind,
+      source,
+      label,
+      mimeType: image.mimeType ?? null,
+      sha256: image.sha256,
+      atSec,
+    })
+  }
+
+  blocks
+    .filter((block): block is MessageBlock & ModelImage => block.type === 'image' && !!block.path && !!block.sha256)
+    .forEach((image) => addImage(
+      image,
+      item.message?.role === 'assistant' ? 'output' : 'input',
+      'message',
+      item.message?.role === 'assistant' ? 'Assistant message image' : 'User message attachment',
+      item.start_ms / 1000,
+    ))
+
+  for (const input of item.model_inputs ?? []) {
+    const request = input.request_index == null ? '' : ` #${input.request_index}`
+    const classified = [...(input.new_images ?? []), ...(input.context_images ?? [])]
+    const candidates = classified.length ? classified : input.images ?? []
+    for (const image of candidates) {
+      const context = input.context_images?.some((candidate) => candidate.sha256 === image.sha256)
+      addImage(image, 'input', 'model', `Model input${request} · ${context ? 'context' : 'new'}`, item.start_ms / 1000)
+    }
+  }
+
+  for (const tool of item.tools) {
+    for (const image of imageRefs(tool.result)) {
+      addImage(image, 'output', 'tool', `${tool.name} result`, (tool.end_ms ?? tool.start_ms) / 1000)
+    }
   }
 
   const mutations: Mutation[] = item.tools.map((tool) => ({
@@ -253,6 +316,8 @@ function workItemToStep(
     tokens: prompt != null || completion != null ? { prompt, completion } : null,
     timestamp: null,
     tSec: item.start_ms / 1000,
+    endSec: endMs / 1000,
+    images: images.length ? images : null,
     mutations: mutations.length ? mutations : null,
     edits: edits.length ? edits : null,
   }
@@ -286,7 +351,15 @@ function toViewerBundle(
   const taskId = `oss-${batch.batch_id}-${taskSummary.key}`
   const runId = `${taskId}-run`
   const agentId = `${taskId}-agent`
-  const steps = work.items.map((item, index) => workItemToStep(item, index, batch.batch_id, taskSummary.key, frames))
+  const steps = work.items.map((item, index) => workItemToStep(item, index, batch.batch_id, taskSummary.key))
+  const desktopTimeline = frames
+    .filter((frame): frame is TimelineStamp & { frame_index: number } => typeof frame.frame_index === 'number')
+    .map((frame) => ({
+      atMs: frame.at_ms,
+      frameIndex: frame.frame_index,
+      url: frameUrl(batch.batch_id, taskSummary.key, frame.frame_index),
+    }))
+    .sort((a, b) => a.atMs - b.atMs)
   const firstUserText = steps.find((step) => step.role === 'user' && step.text)?.text
   const artifacts = [...new Set(steps.flatMap((step) => (step.mutations ?? []).map((mutation) => mutation.target).filter(Boolean) as string[]))]
   const promptTokens = steps.reduce((sum, step) => sum + (step.tokens?.prompt ?? 0), 0)
@@ -347,5 +420,5 @@ function toViewerBundle(
     },
     failureReason: taskSummary.error ?? null,
   }
-  return { task, run, agent, vendor }
+  return { task, run, agent, vendor, desktopTimeline }
 }

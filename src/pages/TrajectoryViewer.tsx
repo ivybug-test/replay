@@ -13,7 +13,8 @@ import AftPanel from '../components/AftPanel'
 import type { AftReport } from '../lib/aft'
 import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, prettyModel } from '../lib/format'
 import { useDatasetStore, useLookups, useRunSteps } from '../lib/dataset'
-import type { Agent, HumanLabel, LabelDecision, Mutation, Run, Step, Task, Vendor } from '../lib/types'
+import type { DesktopFrame } from '../lib/ossReplay'
+import type { Agent, HumanLabel, LabelDecision, Mutation, Run, Step, StepImage, Task, Vendor } from '../lib/types'
 
 const MUT_STYLES: Record<Mutation['kind'], string> = {
   file: 'bg-sky-500/15 text-sky-300',
@@ -143,11 +144,42 @@ function stepTitle(s: Step): string {
   return s.role
 }
 
+function stepAnchorMs(step: Step): number {
+  return Math.max(0, (step.endSec ?? step.tSec ?? 0) * 1000)
+}
+
+function stepIndexAt(steps: Step[], atMs: number): number {
+  let match = 0
+  for (let index = 0; index < steps.length; index += 1) {
+    if ((steps[index].tSec ?? 0) * 1000 > atMs) break
+    match = index
+  }
+  return match
+}
+
+function causalDesktopFrame(frames: DesktopFrame[] | undefined, atMs: number): DesktopFrame | null {
+  if (!frames?.length) return null
+  let low = 0
+  let high = frames.length - 1
+  let match = -1
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    if (frames[middle].atMs <= atMs) {
+      match = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return match >= 0 ? frames[match] : null
+}
+
 interface TrajectoryViewerProps {
   taskOverride?: Task
   runOverride?: Run
   agentOverride?: Agent
   vendorOverride?: Vendor
+  desktopTimeline?: DesktopFrame[]
   verifierLogOverride?: string | null
   backTo?: string
 }
@@ -157,6 +189,7 @@ export default function TrajectoryViewer({
   runOverride,
   agentOverride,
   vendorOverride,
+  desktopTimeline,
   verifierLogOverride,
   backTo,
 }: TrajectoryViewerProps = {}) {
@@ -178,17 +211,14 @@ export default function TrajectoryViewer({
     const n = Number(stepParam)
     return stepParam != null && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   })
-  useEffect(() => {
-    if (stepParam == null) return
-    const n = Number(stepParam)
-    if (Number.isFinite(n) && n >= 0) setActiveStep(Math.floor(n))
-  }, [stepParam])
   const [panel, setPanel] = useState<'step' | 'artifacts' | 'analysis' | 'aft' | 'labels'>('step')
   const [aftSteps, setAftSteps] = useState<Set<number>>(new Set())
   const [labels, setLabels] = useState<HumanLabel[]>([])
   const [noteDraft, setNoteDraft] = useState('')
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(1) // steps per second
+  const [speed, setSpeed] = useState(1)
+  const [desktopCursorMs, setDesktopCursorMs] = useState(0)
+  const desktopCursorRef = useRef(0)
   const timelineRef = useRef<ImperativePanelHandle>(null)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const toggleTimeline = () => {
@@ -199,12 +229,38 @@ export default function TrajectoryViewer({
 
   const stepLabel = useMemo(() => labels.find((l) => l.stepIndex === activeStep), [labels, activeStep])
   const stepCount = loadedSteps.length
+  const hasDesktopTimeline = !!desktopTimeline?.length
+  const timedDurationMs = useMemo(() => Math.max(
+    (runForSteps?.durationSec ?? 0) * 1000,
+    desktopTimeline?.[desktopTimeline.length - 1]?.atMs ?? 0,
+    ...loadedSteps.map(stepAnchorMs),
+  ), [desktopTimeline, loadedSteps, runForSteps?.durationSec])
+
+  const moveDesktopCursor = useCallback((atMs: number) => {
+    const next = Math.max(0, Math.min(atMs, timedDurationMs || atMs))
+    desktopCursorRef.current = next
+    setDesktopCursorMs(next)
+  }, [timedDurationMs])
+
+  const selectStep = useCallback((index: number) => {
+    const next = Math.max(0, Math.min(index, Math.max(0, loadedSteps.length - 1)))
+    setActiveStep(next)
+    if (hasDesktopTimeline && loadedSteps[next]) moveDesktopCursor(stepAnchorMs(loadedSteps[next]))
+  }, [hasDesktopTimeline, loadedSteps, moveDesktopCursor])
 
   // Reset to the start when a different trajectory opens.
   useEffect(() => {
     setActiveStep(0)
     setPlaying(false)
-  }, [replayKey])
+    const first = loadedSteps[0]
+    moveDesktopCursor(hasDesktopTimeline && first ? stepAnchorMs(first) : 0)
+  }, [replayKey, hasDesktopTimeline, loadedSteps, moveDesktopCursor])
+
+  useEffect(() => {
+    if (stepParam == null) return
+    const n = Number(stepParam)
+    if (Number.isFinite(n) && n >= 0) selectStep(Math.floor(n))
+  }, [stepParam, selectStep])
 
   const handleAftReport = useCallback((r: AftReport | null) => {
     const s = new Set<number>()
@@ -215,16 +271,32 @@ export default function TrajectoryViewer({
     setAftSteps(s)
   }, [])
 
-  // Film playback: advance one step per tick while playing.
+  // Live desktop playback follows recorded wall-clock time. Dataset-only runs
+  // retain the original step-per-tick behavior because they have no frame clock.
   useEffect(() => {
     if (!playing) return
-    if (activeStep >= stepCount - 1) {
-      setPlaying(false)
-      return
+    if (hasDesktopTimeline) {
+      let animation = 0
+      let previous = performance.now()
+      const tick = (now: number) => {
+        const next = Math.min(timedDurationMs, desktopCursorRef.current + (now - previous) * speed)
+        previous = now
+        desktopCursorRef.current = next
+        setDesktopCursorMs(next)
+        setActiveStep(stepIndexAt(loadedSteps, next))
+        if (next >= timedDurationMs) {
+          setPlaying(false)
+          return
+        }
+        animation = requestAnimationFrame(tick)
+      }
+      animation = requestAnimationFrame(tick)
+      return () => cancelAnimationFrame(animation)
     }
+    if (activeStep >= stepCount - 1) { setPlaying(false); return }
     const id = setTimeout(() => setActiveStep((s) => Math.min(s + 1, stepCount - 1)), 1000 / speed)
     return () => clearTimeout(id)
-  }, [playing, activeStep, speed, stepCount])
+  }, [playing, activeStep, speed, stepCount, hasDesktopTimeline, timedDurationMs, loadedSteps])
 
   if (!runOverride && error) return <div className="p-8 text-rose-400">Failed to load dataset: {error}</div>
   if (!runOverride && (!data || !lk)) return <Loading />
@@ -278,6 +350,7 @@ export default function TrajectoryViewer({
   }
 
   const step = erun.steps[Math.min(activeStep, erun.steps.length - 1)]
+  const desktopFrame = causalDesktopFrame(desktopTimeline, desktopCursorMs)
 
   function upsertLabel(patch: Partial<HumanLabel>) {
     setLabels((prev) => {
@@ -318,17 +391,23 @@ export default function TrajectoryViewer({
         count={erun.steps.length}
         playing={playing}
         speed={speed}
+        timeBased={hasDesktopTimeline}
         title={stepTitle(step)}
         role={step.role}
-        elapsedSec={step.tSec ?? null}
+        elapsedSec={hasDesktopTimeline ? desktopCursorMs / 1000 : step.tSec ?? null}
         totalSec={run.durationSec}
         onPlay={() => {
-          if (activeStep >= erun.steps.length - 1) setActiveStep(0)
+          if (hasDesktopTimeline && desktopCursorMs >= timedDurationMs - 1) {
+            moveDesktopCursor(0)
+            setActiveStep(0)
+          } else if (!hasDesktopTimeline && activeStep >= erun.steps.length - 1) {
+            setActiveStep(0)
+          }
           setPlaying((p) => !p)
         }}
-        onPrev={() => { setPlaying(false); setActiveStep((s) => Math.max(0, s - 1)) }}
-        onNext={() => { setPlaying(false); setActiveStep((s) => Math.min(erun.steps.length - 1, s + 1)) }}
-        onSeek={(i) => { setPlaying(false); setActiveStep(i) }}
+        onPrev={() => { setPlaying(false); selectStep(activeStep - 1) }}
+        onNext={() => { setPlaying(false); selectStep(activeStep + 1) }}
+        onSeek={(i) => { setPlaying(false); selectStep(i) }}
         onSpeed={setSpeed}
         stepsCollapsed={timelineCollapsed}
         onToggleSteps={toggleTimeline}
@@ -355,7 +434,7 @@ export default function TrajectoryViewer({
               return (
                 <li key={s.index}>
                   <button
-                    onClick={() => { setPlaying(false); setActiveStep(s.index) }}
+                    onClick={() => { setPlaying(false); selectStep(s.index) }}
                     className={clsx(
                       'flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors',
                       s.index === activeStep ? 'bg-ink-800 ring-1 ring-accent/40' : 'hover:bg-ink-800/50',
@@ -374,6 +453,9 @@ export default function TrajectoryViewer({
                         ) : null}
                         {s.mutations?.length ? (
                           <span className="chip bg-accent/15 text-accent" title="artifact change">±{s.mutations.length}</span>
+                        ) : null}
+                        {s.images?.length ? (
+                          <span className="chip bg-sky-500/15 text-sky-300" title={`${s.images.length} message image${s.images.length === 1 ? '' : 's'}`}>img {s.images.length}</span>
                         ) : null}
                         {aftSteps.has(s.index) ? (
                           <span className="chip bg-rose-500/20 text-rose-300" title="AFT-flagged failure step">AFT</span>
@@ -399,8 +481,25 @@ export default function TrajectoryViewer({
 
         {/* Environment stage — the "film screen" */}
         <Panel defaultSize={53} minSize={25}>
-        <div data-tour="stage" className="h-full min-w-0 overflow-hidden">
-          <EnvironmentStage steps={erun.steps} activeStep={activeStep} task={task} />
+        <div data-tour="stage" className="flex h-full min-w-0 flex-col overflow-hidden">
+          {hasDesktopTimeline && (
+            <DesktopTimelineBar
+              frames={desktopTimeline!}
+              frame={desktopFrame}
+              cursorMs={desktopCursorMs}
+              durationMs={timedDurationMs}
+              step={step}
+              onSeek={(atMs) => { setPlaying(false); moveDesktopCursor(atMs) }}
+            />
+          )}
+          <div className="min-h-0 flex-1">
+            <EnvironmentStage
+              steps={erun.steps}
+              activeStep={activeStep}
+              task={task}
+              desktopScreenshot={desktopFrame ? { url: desktopFrame.url } : undefined}
+            />
+          </div>
         </div>
         </Panel>
         <PanelResizeHandle className="w-1 bg-ink-700 transition-colors hover:bg-accent/50" />
@@ -442,11 +541,11 @@ export default function TrajectoryViewer({
                 agent={agent}
                 vendor={vendor}
                 activeStep={activeStep}
-                onJumpToStep={(i) => { setPlaying(false); setActiveStep(i) }}
+                onJumpToStep={(i) => { setPlaying(false); selectStep(i) }}
                 onReport={handleAftReport}
               />
             ) : panel === 'artifacts' ? (
-              <RunArtifacts run={erun} activeStep={activeStep} onJump={(i) => { setPlaying(false); setActiveStep(i) }} />
+              <RunArtifacts run={erun} activeStep={activeStep} onJump={(i) => { setPlaying(false); selectStep(i) }} />
             ) : (
               <div className="space-y-4">
                 <div>
@@ -490,7 +589,7 @@ export default function TrajectoryViewer({
                     {[...labels].sort((a, b) => a.stepIndex - b.stepIndex).map((l) => (
                       <button
                         key={l.stepIndex}
-                        onClick={() => setActiveStep(l.stepIndex)}
+                        onClick={() => selectStep(l.stepIndex)}
                         className="block w-full rounded-lg border border-ink-700 p-2 text-left hover:bg-ink-800/40"
                       >
                         <div className="flex items-center gap-2">
@@ -513,11 +612,81 @@ export default function TrajectoryViewer({
   )
 }
 
+function clockMs(ms: number): string {
+  const safe = Math.max(0, ms)
+  const minutes = Math.floor(safe / 60_000)
+  const seconds = Math.floor((safe % 60_000) / 1000)
+  const millis = Math.floor(safe % 1000)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`
+}
+
+function DesktopTimelineBar({
+  frames,
+  frame,
+  cursorMs,
+  durationMs,
+  step,
+  onSeek,
+}: {
+  frames: DesktopFrame[]
+  frame: DesktopFrame | null
+  cursorMs: number
+  durationMs: number
+  step: Step
+  onSeek: (atMs: number) => void
+}) {
+  const framePosition = frame ? frames.findIndex((candidate) => candidate.frameIndex === frame.frameIndex) : -1
+  const delta = frame ? frame.atMs - cursorMs : null
+  const startMs = (step.tSec ?? 0) * 1000
+  const anchorMs = stepAnchorMs(step)
+  const hasInterval = anchorMs > startMs + 1
+  const previous = framePosition > 0 ? frames[framePosition - 1] : null
+  const next = frames[Math.max(0, framePosition + 1)]
+
+  return (
+    <div className="shrink-0 border-b border-ink-700 bg-ink-900/80 px-3 py-2">
+      <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        <span className="font-semibold uppercase tracking-wide text-amber-300">Desktop timeline</span>
+        <span className="font-mono tabular-nums text-zinc-300">
+          Step #{step.index + 1} {clockMs(startMs)}{hasInterval ? `–${clockMs(anchorMs)} · anchor end` : ' · anchor start'}
+        </span>
+        <span className="text-zinc-600">→</span>
+        <span className="font-mono tabular-nums text-sky-300">playhead {clockMs(cursorMs)}</span>
+        {frame ? (
+          <span className="font-mono tabular-nums text-emerald-300">
+            → frame #{frame.frameIndex} {clockMs(frame.atMs)} · {delta === 0 ? 'exact' : `${(Math.abs(delta!) / 1000).toFixed(3)}s behind`}
+          </span>
+        ) : (
+          <span className="text-amber-300">→ waiting for the first captured frame</span>
+        )}
+        <span className="ml-auto text-zinc-500" title="The selected step sets the playhead anchor. Desktop always chooses the latest captured frame at or before that time, so it never shows a future screen.">
+          latest causal frame · no future look-ahead
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button disabled={!previous} onClick={() => previous && onSeek(previous.atMs)} className="btn-ghost px-1.5 py-0.5 disabled:opacity-30" title="Previous desktop frame">‹</button>
+        <input
+          aria-label="Desktop time"
+          type="range"
+          min={0}
+          max={Math.max(1, durationMs)}
+          step={10}
+          value={Math.min(cursorMs, Math.max(1, durationMs))}
+          onChange={(event) => onSeek(Number(event.target.value))}
+          className="h-1 min-w-0 flex-1 cursor-pointer accent-amber-400"
+        />
+        <button disabled={!next || next === frame} onClick={() => next && onSeek(next.atMs)} className="btn-ghost px-1.5 py-0.5 disabled:opacity-30" title="Next desktop frame">›</button>
+        <span className="w-20 shrink-0 text-right font-mono text-[10px] tabular-nums text-zinc-500">{frames.length} frames</span>
+      </div>
+    </div>
+  )
+}
+
 function Transport({
-  active, count, playing, speed, title, role, elapsedSec, totalSec, stepsCollapsed,
+  active, count, playing, speed, timeBased, title, role, elapsedSec, totalSec, stepsCollapsed,
   onPlay, onPrev, onNext, onSeek, onSpeed, onToggleSteps,
 }: {
-  active: number; count: number; playing: boolean; speed: number; title: string; role: string
+  active: number; count: number; playing: boolean; speed: number; timeBased: boolean; title: string; role: string
   elapsedSec: number | null; totalSec: number | null; stepsCollapsed: boolean
   onPlay: () => void; onPrev: () => void; onNext: () => void
   onSeek: (i: number) => void; onSpeed: (s: number) => void; onToggleSteps: () => void
@@ -561,9 +730,9 @@ function Transport({
       ) : null}
       <span className={clsx('chip shrink-0 capitalize', ROLE_STYLES[role])}>{role}</span>
       <span className="min-w-0 flex-1 truncate text-sm text-zinc-400">{title}</span>
-      <div className="flex shrink-0 items-center gap-1 text-xs text-zinc-500">
-        speed
-        {[0.5, 1, 2, 4].map((s) => (
+      <div className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={timeBased ? 'Recorded wall-clock playback speed' : 'Steps advanced per second'}>
+        {timeBased ? 'wall time' : 'step speed'}
+        {(timeBased ? [1, 2, 4, 8, 16] : [0.5, 1, 2, 4]).map((s) => (
           <button
             key={s}
             onClick={() => onSpeed(s)}
@@ -600,6 +769,7 @@ function StepPanel({ step }: { step: Step }) {
           <SmartContent text={step.text} />
         </Field>
       )}
+      <StepImageGallery images={(step.images ?? []).filter((image) => image.kind === 'input')} label="Input images" />
       {step.toolCalls?.map((tc, i) => (
         <div key={i}>
           <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
@@ -612,6 +782,7 @@ function StepPanel({ step }: { step: Step }) {
       {step.observation && (
         <Field label="Observation" muted><SmartContent text={step.observation} mono /></Field>
       )}
+      <StepImageGallery images={(step.images ?? []).filter((image) => image.kind === 'output')} label="Output images" />
       {step.mutations && step.mutations.length > 0 && (
         <div>
           <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
@@ -621,9 +792,43 @@ function StepPanel({ step }: { step: Step }) {
           <MutationList mutations={step.mutations} />
         </div>
       )}
-      {!step.text && !step.reasoning && !step.toolCalls?.length && !step.observation && (
+      {!step.text && !step.reasoning && !step.toolCalls?.length && !step.observation && !step.images?.length && (
         <p className="text-sm text-zinc-600">No content for this step.</p>
       )}
+    </div>
+  )
+}
+
+function StepImageGallery({ images, label }: { images: StepImage[]; label: string }) {
+  if (!images.length) return null
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
+        {label}
+        <span className="chip bg-sky-500/15 text-sky-300 normal-case">{images.length}</span>
+      </div>
+      <div className="space-y-2">
+        {images.map((image, index) => (
+          <figure key={`${image.kind}:${image.source}:${image.sha256 ?? image.url}:${index}`} className="overflow-hidden rounded-lg border border-ink-700 bg-ink-950">
+            <a href={image.url} target="_blank" rel="noreferrer" className="block bg-black/30" title="Open original image">
+              <img
+                src={image.url}
+                alt={image.label}
+                loading="lazy"
+                className="mx-auto block max-h-80 w-full object-contain"
+              />
+            </a>
+            <figcaption className="flex flex-wrap items-center gap-1.5 border-t border-ink-700 px-2.5 py-2 text-[10px]">
+              <span className={clsx('chip normal-case', image.kind === 'input' ? 'bg-sky-500/15 text-sky-300' : 'bg-violet-500/15 text-violet-300')}>
+                {image.source}
+              </span>
+              <span className="text-zinc-300">{image.label}</span>
+              {image.atSec != null && <span className="ml-auto font-mono tabular-nums text-zinc-500">{clockMs(image.atSec * 1000)}</span>}
+              {image.mimeType && <span className="text-zinc-600">{image.mimeType}</span>}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
     </div>
   )
 }

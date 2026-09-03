@@ -57,6 +57,17 @@ export interface ToolCall {
   args?: string
 }
 
+export interface StepImage {
+  url: string
+  kind: 'input' | 'output'
+  source: 'message' | 'model' | 'tool'
+  label: string
+  mimeType?: string | null
+  sha256?: string | null
+  /** Real episode time associated with the image, when known. */
+  atSec?: number | null
+}
+
 /** Structured environment edit used to reconstruct the visual artifact stage. */
 export type Edit =
   | { t: 'sheet'; target?: string; sheet: string; anchor: string; cells: string[][] }
@@ -88,6 +99,10 @@ export interface Step {
   timestamp?: string | null
   /** Elapsed seconds from the run's first step (when real timestamps exist). */
   tSec?: number | null
+  /** End of the step's real interval. A collapsed live Work item can span thinking and tools. */
+  endSec?: number | null
+  /** Images carried by messages/model requests/tool results, separate from Desktop frames. */
+  images?: StepImage[] | null
   mutations?: Mutation[] | null
   edits?: Edit[] | null
 }

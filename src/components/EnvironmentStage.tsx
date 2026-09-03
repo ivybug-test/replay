@@ -345,8 +345,23 @@ function findArcAgentOutput(steps: Step[], upto: number): ArcAgentOutput | null 
   return null
 }
 
-function ArtifactViewer({ steps, activeStep, task, ws }: { steps: Step[]; activeStep: number; task?: Task; ws: Workspace }) {
+function ArtifactViewer({
+  steps,
+  activeStep,
+  task,
+  ws,
+  desktopScreenshot,
+}: {
+  steps: Step[]
+  activeStep: number
+  task?: Task
+  ws: Workspace
+  desktopScreenshot?: { url: string }
+}) {
   const stage = useMemo(() => reconstructStage(steps, activeStep), [steps, activeStep])
+  const screenshot: ScreenshotState | undefined = desktopScreenshot
+    ? { url: desktopScreenshot.url, step: activeStep, count: 1 }
+    : stage.screenshot
 
   // Files the agent wrote/edited (with captured content) become renderable
   // artifacts too — so "what the agent did to the files" shows here, not just
@@ -390,12 +405,12 @@ function ArtifactViewer({ steps, activeStep, task, ws }: { steps: Step[]; active
     stage.sheets.forEach((s) => list.push({ kind: 'sheet', id: s.key, label: baseName(s.target) + (s.name ? ` · ${s.name}` : '') }))
     stage.docs.forEach((d) => list.push({ kind: 'doc', id: d.key, label: d.name }))
     if (stage.web) list.push({ kind: 'web', id: 'web', label: 'Web page' })
-    if (stage.computer || stage.screenshot)
-      list.push({ kind: 'computer', id: 'computer', label: stage.screenshot ? 'Screen' : 'Desktop' })
+    if (stage.computer || screenshot)
+      list.push({ kind: 'computer', id: 'computer', label: screenshot ? 'Screen' : 'Desktop' })
     if (stage.answer) list.push({ kind: 'answer', id: 'answer', label: 'Final answer' })
     writtenFiles.forEach((f) => list.push({ kind: 'file', id: f.path, label: baseName(f.path) }))
     return list
-  }, [stage, isArc, writtenFiles])
+  }, [stage, screenshot, isArc, writtenFiles])
 
   const [selected, setSelected] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -414,7 +429,7 @@ function ArtifactViewer({ steps, activeStep, task, ws }: { steps: Step[]; active
   }, [activeStep, stage, fileChangedAt?.path])
 
   // Even with no generic visual, the ARC mode always renders the expected grid.
-  if (!stage.hasVisual && !isArc && writtenFiles.length === 0) {
+  if (!stage.hasVisual && !screenshot && !isArc && writtenFiles.length === 0) {
     return (
       <div className="grid h-full place-items-center p-6 text-center text-xs text-zinc-600">
         No rendered artifact yet — the agent hasn't written a file or produced a spreadsheet, document, web view, screenshot, or answer up to this step.
@@ -465,8 +480,8 @@ function ArtifactViewer({ steps, activeStep, task, ws }: { steps: Step[]; active
             <DocView doc={stage.docs.find((d) => d.key === cur.id)!} activeStep={activeStep} />
           )}
           {cur?.kind === 'web' && stage.web && <WebView web={stage.web} />}
-          {cur?.kind === 'computer' && (stage.computer || stage.screenshot) && (
-            <ComputerView comp={stage.computer} screenshot={stage.screenshot} run={compBounds} />
+          {cur?.kind === 'computer' && (stage.computer || screenshot) && (
+            <ComputerView comp={desktopScreenshot ? undefined : stage.computer} screenshot={screenshot} run={compBounds} />
           )}
           {cur?.kind === 'answer' && stage.answer && <AnswerView answer={stage.answer} />}
           {cur?.kind === 'arc' && arcExpected && <ArcCompareView expected={arcExpected} agent={arcAgent} />}
@@ -874,7 +889,17 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   )
 }
 
-export default function EnvironmentStage({ steps, activeStep, task }: { steps: Step[]; activeStep: number; task?: Task }) {
+export default function EnvironmentStage({
+  steps,
+  activeStep,
+  task,
+  desktopScreenshot,
+}: {
+  steps: Step[]
+  activeStep: number
+  task?: Task
+  desktopScreenshot?: { url: string }
+}) {
   const ws = useMemo(() => reconstructWorkspace(steps, activeStep, task?.files), [steps, activeStep, task])
   return (
     <PanelGroup direction="vertical" className="h-full" autoSaveId="stage-vertical">
@@ -883,7 +908,7 @@ export default function EnvironmentStage({ steps, activeStep, task }: { steps: S
       </Panel>
       <PanelResizeHandle className="h-1 bg-ink-700 transition-colors hover:bg-accent/50" />
       <Panel defaultSize={48} minSize={15}>
-        <ArtifactViewer steps={steps} activeStep={activeStep} task={task} ws={ws} />
+        <ArtifactViewer steps={steps} activeStep={activeStep} task={task} ws={ws} desktopScreenshot={desktopScreenshot} />
       </Panel>
     </PanelGroup>
   )
