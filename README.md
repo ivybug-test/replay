@@ -30,6 +30,14 @@ Production deployment on this host is managed by the user systemd service
 npm run deploy        # build, restart, and verify http://127.0.0.1:18768/live
 ```
 
+### Execution State
+
+The State panel shows only Observer descriptions, interval numbers and model-turn
+counts. It reads `observer_interval` events from live/archived Harness ATIF and
+uses `state.observer` when only the latest snapshot is present. Time links jump
+to the observed interval when its source timestamp is available. Old Goal,
+Action, Checkpoint and other execution metrics are no longer displayed.
+
 ## Upstream project
 
 The source below describes the original project on which Replay is based.

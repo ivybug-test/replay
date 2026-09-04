@@ -560,12 +560,12 @@ export default function TrajectoryViewer({
           <div data-tour="rail-tabs" className="flex border-b border-ink-700">
             {([
               ['step', 'Step'],
-              ['state', `State${executionState?.events.length ? ` (${executionState.events.length})` : ''}`],
+              ['state', `State${executionState?.events.filter(event => event.event === 'observer_interval').length ? ` (${executionState.events.filter(event => event.event === 'observer_interval').length})` : ''}`],
               ['analysis', 'Reward & Verifier log'],
               ['artifacts', `Changes${run.artifacts?.length ? ` (${run.artifacts.length})` : ''}`],
               ['aft', 'AFT'],
               ['labels', 'Label/Note'],
-            ] as const).filter(([p]) => p !== 'state' || !!executionState?.events.length || !!loadExecutionState).map(([p, lbl]) => (
+            ] as const).filter(([p]) => p !== 'state' || !!executionState?.events.filter(event => event.event === 'observer_interval').length || !!loadExecutionState).map(([p, lbl]) => (
               <button
                 key={p}
                 data-tour={`tab-${p}`}

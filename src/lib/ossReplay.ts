@@ -1,4 +1,5 @@
 import { atifTrajectoryToSteps } from './atifToViewer'
+import { observerEvents } from './observerFeed'
 import { parseAtifTrajectory, type AtifTrajectory } from './atif'
 import { atifLiveToTrajectory, type AtifLiveStream } from './atifLive'
 import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
@@ -67,13 +68,13 @@ export interface DesktopFrame {
 
 export type ExecutionStateKind =
   | 'declaration' | 'goal' | 'action' | 'checkpoint'
-  | 'attempt' | 'evidence' | 'failure' | 'recovery'
+  | 'attempt' | 'evidence' | 'failure' | 'recovery' | 'observer'
 
 export interface ExecutionStateEvent {
   sequence: number
   episode_elapsed_ms: number
   time?: string | null
-  event: `execution_state_${ExecutionStateKind}`
+  event: `execution_state_${ExecutionStateKind}` | 'observer_interval'
   version?: string
   status?: string
   transition?: string
@@ -87,7 +88,7 @@ export interface ExecutionStateEvent {
 
 export interface ExecutionStateFeed {
   version: string
-  counts: Record<ExecutionStateKind, number>
+  counts: Partial<Record<ExecutionStateKind, number>>
   events: ExecutionStateEvent[]
   duration_ms: number
   terminal: boolean
@@ -330,17 +331,12 @@ function toViewerBundle(
     },
     failureReason: taskSummary.error ?? null,
   }
-  const state = extensions.executionState
-  const executionState: ExecutionStateFeed | undefined = state ? {
-    version: state.schema_version, source: 'trajectory_extra',
+  const reports = trajectory ? observerEvents(trajectory) : []
+  const executionState: ExecutionStateFeed | undefined = trajectory ? {
+    version: 'observer', source: 'trajectory_extra',
     duration_ms: traceDurationMs, terminal: taskSummary.status !== 'running',
-    task_status: taskSummary.status, final_state: state.final_state,
-    counts: Object.fromEntries(['declaration', 'goal', 'action', 'checkpoint', 'attempt', 'evidence', 'failure', 'recovery']
-      .map((kind) => [kind, state.events.filter((item) => item.event_type === kind).length])) as Record<ExecutionStateKind, number>,
-    events: state.events.map((item, index) => ({
-      ...item, sequence: item.sequence ?? index + 1,
-      event: `execution_state_${item.event_type}` as ExecutionStateEvent['event'], version: state.schema_version,
-    })),
+    task_status: taskSummary.status,
+    counts: { observer: reports.length }, events: reports,
   } : undefined
   return { task, run, agent, vendor, desktopTimeline, executionState }
 }
