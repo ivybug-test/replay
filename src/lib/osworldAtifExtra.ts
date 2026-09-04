@@ -151,9 +151,10 @@ export interface ExecutionStateAttemptRecord {
   id: string
   goal_id: string
   focus?: string | null
-  route?: Record<string, unknown> | null
-  intent: string
-  expected_effect: string
+  route?: string | Record<string, unknown> | null
+  intent?: string
+  expected_effect?: string
+  checkpoint_id?: string
   actor?: string | null
   checkpoint_ids?: string[]
   action_ids?: string[]
@@ -168,9 +169,9 @@ export interface ExecutionStateEvidenceRecord {
   attempt_ids?: string[]
   checkpoint_id?: string | null
   facts?: unknown[]
-  information_gained?: string | null
+  information_gained?: string[] | string | null
   progress?: string | null
-  goal_satisfied?: boolean | null
+  goal_satisfied?: 'yes' | 'no' | 'uncertain' | boolean | null
   before_ref?: string | null
   after_ref?: string | null
   result_refs?: string[]
@@ -242,6 +243,9 @@ export interface ExecutionStateFinalStateV2 {
   evidence?: ExecutionStateEvidenceRecord[]
   failures?: ExecutionStateFailureRecord[]
   recovery_items?: ExecutionStateRecoveryRecord[]
+  active_goal_path?: ExecutionStateGoalRecord[]
+  actions?: ExecutionStateActionRecord[]
+  checkpoints?: ExecutionStateCheckpointRecord[]
   [key: string]: unknown
 }
 
@@ -293,9 +297,23 @@ function validateStateRecord(eventType: string, value: unknown, path: string, is
     if (!['action_limit', 'tool_error', 'blocked', 'delegation', 'return'].includes(String(value.trigger))) issues.push(`${path}.trigger is not supported`)
     if (!['complete', 'incomplete'].includes(String(value.status))) issues.push(`${path}.status must be complete or incomplete`)
   } else if (eventType === 'attempt') {
-    for (const field of ['goal_id', 'intent', 'expected_effect']) requireString(value, field, path, issues)
+    requireString(value, 'goal_id', path, issues)
+    if (typeof value.route === 'string') {
+      for (const field of ['focus', 'route', 'checkpoint_id']) requireString(value, field, path, issues)
+      if (!Array.isArray(value.action_ids) || !value.action_ids.length) issues.push(`${path}.action_ids is required`)
+    } else {
+      for (const field of ['intent', 'expected_effect']) requireString(value, field, path, issues)
+    }
   } else if (eventType === 'evidence') {
     requireString(value, 'goal_id', path, issues)
+    if (value.information_gained != null && typeof value.information_gained !== 'string'
+      && !(Array.isArray(value.information_gained) && value.information_gained.every((item) => typeof item === 'string'))) {
+      issues.push(`${path}.information_gained must be a string or string array`)
+    }
+    if (value.goal_satisfied != null && typeof value.goal_satisfied !== 'boolean'
+      && !['yes', 'no', 'uncertain'].includes(String(value.goal_satisfied))) {
+      issues.push(`${path}.goal_satisfied is not supported`)
+    }
   } else if (eventType === 'failure') {
     for (const field of ['goal_id', 'status']) requireString(value, field, path, issues)
     if (!Array.isArray(value.attempt_ids)) issues.push(`${path}.attempt_ids must be an array`)

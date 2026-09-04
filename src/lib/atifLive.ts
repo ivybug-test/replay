@@ -82,6 +82,7 @@ export function atifLiveToTrajectory(stream: AtifLiveStream): AtifTrajectory | n
   const parents = new Map<string, { parentId: string; callId?: string }>()
   const harnessEvents: Loose[] = []
   const desktopFrames: Loose[] = []
+  let executionState: Loose | undefined
   let sessionId: string | undefined
 
   const documentFor = (trajectoryId: unknown): LiveDocument | undefined => {
@@ -131,6 +132,11 @@ export function atifLiveToTrajectory(stream: AtifLiveStream): AtifTrajectory | n
       }
     } else if (patch.op === 'append_desktop_frame') {
       desktopFrames.push(clone(patch.frame))
+    } else if (patch.op === 'append_execution_state_event') {
+      executionState ??= { schema_version: 'execution-state/v2', events: [] }
+      executionState.events.push(clone(patch.event))
+    } else if (patch.op === 'replace_execution_state') {
+      executionState = clone(object(patch.execution_state))
     } else if (patch.op === 'append_harness_event') {
       const event = clone(object(patch.event))
       harnessEvents.push(event)
@@ -188,5 +194,6 @@ export function atifLiveToTrajectory(stream: AtifLiveStream): AtifTrajectory | n
       status: desktopFrames.length ? 'enabled' : 'disabled', terminal: stream.terminal, warnings: [],
     },
   } }
+  if (executionState) trajectory.extra.osworld_execution_state = executionState
   return trajectory
 }

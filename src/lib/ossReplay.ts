@@ -56,6 +56,7 @@ export interface ViewerBundle {
   agent: Agent
   vendor: Vendor
   desktopTimeline: DesktopFrame[]
+  executionState?: ExecutionStateFeed
 }
 
 export interface DesktopFrame {
@@ -329,5 +330,17 @@ function toViewerBundle(
     },
     failureReason: taskSummary.error ?? null,
   }
-  return { task, run, agent, vendor, desktopTimeline }
+  const state = extensions.executionState
+  const executionState: ExecutionStateFeed | undefined = state ? {
+    version: state.schema_version, source: 'trajectory_extra',
+    duration_ms: traceDurationMs, terminal: taskSummary.status !== 'running',
+    task_status: taskSummary.status, final_state: state.final_state,
+    counts: Object.fromEntries(['declaration', 'goal', 'action', 'checkpoint', 'attempt', 'evidence', 'failure', 'recovery']
+      .map((kind) => [kind, state.events.filter((item) => item.event_type === kind).length])) as Record<ExecutionStateKind, number>,
+    events: state.events.map((item, index) => ({
+      ...item, sequence: item.sequence ?? index + 1,
+      event: `execution_state_${item.event_type}` as ExecutionStateEvent['event'], version: state.schema_version,
+    })),
+  } : undefined
+  return { task, run, agent, vendor, desktopTimeline, executionState }
 }

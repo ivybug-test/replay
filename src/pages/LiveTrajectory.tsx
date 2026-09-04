@@ -52,6 +52,7 @@ export default function LiveTrajectory() {
       agentOverride={bundle.agent}
       vendorOverride={bundle.vendor}
       desktopTimeline={bundle.desktopTimeline}
+      executionState={bundle.executionState}
       loadExecutionState={loadExecutionState}
       backTo={`/live/runs/${encodeURIComponent(batchId)}`}
     />

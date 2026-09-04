@@ -109,8 +109,9 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
           <Badge tone={record.tool_status === 'error' ? 'bg-rose-500/15 text-rose-300' : 'bg-violet-500/15 text-violet-300'}>{value(record.tool)} · {value(record.tool_status)}</Badge>
           <Badge>{value(record.goal_id)}</Badge>
         </div>
-        <p className="text-sm leading-relaxed text-zinc-200">{value(record.intent)}</p>
-        <p className="text-xs leading-relaxed text-zinc-400"><span className="text-zinc-600">Expected: </span>{value(record.expected_effect)}</p>
+        <p className="text-sm leading-relaxed text-zinc-200">{value(record.focus ?? record.intent)}</p>
+        <p className="text-xs leading-relaxed text-zinc-400"><span className="text-zinc-600">{record.route ? 'Route: ' : 'Expected: '}</span>{value(record.route ?? record.expected_effect)}</p>
+        <ReferenceList label="actions" values={list(record.action_ids)} />
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-500"><code>{value(record.id)}</code><span>{value(record.actor)}</span></div>
       </>
     )
@@ -141,6 +142,8 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
         </div>
         <div className="text-[10px] text-zinc-500"><code>{value(record.id)}</code></div>
         <ReferenceList label="actions" values={list(record.action_ids)} />
+        <p className="text-xs text-zinc-400">Goal request: {value(record.goal_update_status)} · Evidence request: {value(record.evidence_update_status ?? record.updater_status)}</p>
+        {(record.goal_diagnostics || record.evidence_diagnostics) && <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-[10px] text-zinc-500">{JSON.stringify({ goal: record.goal_diagnostics, evidence: record.evidence_diagnostics }, null, 2)}</pre>}
       </>
     )
   }
@@ -156,6 +159,9 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
           <Badge>{value(window.updater_status)} updater</Badge>
         </div>
         {window.observed_change && <p className="text-xs leading-relaxed text-zinc-300">{String(window.observed_change)}</p>}
+        {list(window.facts).map((fact, index) => <p key={index} className="text-xs text-zinc-300">{fact}</p>)}
+        <ReferenceList label="learned" values={list(window.information_gained)} />
+        <ReferenceList label="evidence refs" values={[window.before_ref, window.after_ref, ...list(window.result_refs)].filter((item): item is string => typeof item === 'string')} />
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-500"><code>{value(window.id)}</code><code>{value(window.goal_id)}</code><span>{value(window.status)}</span></div>
         <ReferenceList label="attempts" values={list(window.attempt_ids)} />
         <ReferenceList label="basis" values={list(window.basis)} />
@@ -190,8 +196,8 @@ function StateBody({ event }: { event: ExecutionStateEvent }) {
         <Badge>{value(record.status)}</Badge>
         <Badge>{value(record.scope)}</Badge>
       </div>
-      <p className="text-sm leading-relaxed text-zinc-200">{value(route.intent)}</p>
-      <p className="text-xs leading-relaxed text-zinc-400"><span className="text-zinc-600">Expected: </span>{value(route.expected_effect)}</p>
+      <p className="text-sm leading-relaxed text-zinc-200">{value(route.route ?? route.intent)}</p>
+      <p className="text-xs leading-relaxed text-zinc-400">{value(record.observed_invariant ?? route.expected_effect)}</p>
       <div className="text-[10px] text-zinc-500"><code>{value(record.id)}</code> · <code>{value(record.goal_id)}</code></div>
       <ReferenceList label="attempts" values={list(record.attempt_ids)} />
       <ReferenceList label="evidence" values={list(record.evidence_window_ids)} />
