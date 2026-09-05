@@ -6,6 +6,7 @@ export interface AtifLiveStream {
   total_lines: number
   start_line: number
   terminal: boolean
+  has_more?: boolean
   stream?: Record<string, unknown>
   records: Record<string, unknown>[]
 }

@@ -29,7 +29,7 @@ export default function LiveTrajectory() {
         setBundle(next)
         setError(null)
         const status = String(next.task.metadata?.execution_status ?? '')
-        if (!TERMINAL_TASK_STATUSES.has(status)) timer = setTimeout(refresh, 2_000)
+        if (next.hasMore || !TERMINAL_TASK_STATUSES.has(status)) timer = setTimeout(refresh, next.hasMore ? 100 : 2_000)
       } catch (reason) {
         if (controller.signal.aborted) return
         if (!hasBundle) setError(String(reason))

@@ -18,15 +18,43 @@ def descriptors(doc, *, legacy=False):
     if (not valid or type(total) is not int or not 0 <= total <= MAX_LINES
             or not isinstance(chunks, list) or len(chunks) > MAX_CHUNKS):
         raise OssProtocolError('Invalid stream manifest')
-    position = 0
+    position, previous_start = 0, -1
     for chunk in chunks:
         if (not isinstance(chunk, dict) or type(chunk.get('start')) is not int
-                or chunk['start'] != position or type(chunk.get('count')) is not int or chunk['count'] <= 0):
+                or chunk['start'] <= previous_start or chunk['start'] > position
+                or type(chunk.get('count')) is not int or chunk['count'] <= 0
+                or chunk['start'] + chunk['count'] <= position
+                or chunk['start'] + chunk['count'] > MAX_LINES
+                or (legacy and chunk['start'] != position)):
             raise OssProtocolError('Non-contiguous stream chunks')
-        position += chunk['count']
-    if position != total:
+        previous_start = chunk['start']
+        position = chunk['start'] + chunk['count']
+    if total > position or (chunks and total <= previous_start) or (legacy and position != total):
         raise OssProtocolError('Manifest total does not match chunks')
     return chunks
+
+
+def assemble_records(meta, chunks):
+    """Recover identical historical upload overlaps without publishing unready tails."""
+    records, duplicates = [], 0
+    for descriptor, chunk in zip(meta['chunks'], chunks):
+        for offset, record in enumerate(chunk):
+            position = descriptor['start'] + offset
+            if position >= meta['total_lines']:
+                if record.get('stream_sequence') != position + 1:
+                    raise OssProtocolError('Unpublished tail has invalid sequence')
+                continue
+            if position < len(records):
+                if record.get('stream_sequence') != position + 1 or records[position] != record:
+                    raise OssProtocolError('Conflicting overlapping records')
+                duplicates += 1
+            elif position == len(records):
+                records.append(record)
+            else:
+                raise OssProtocolError('Gap in stream records')
+    if len(records) != meta['total_lines']:
+        raise OssProtocolError('Stream length mismatch')
+    return records, duplicates
 
 
 def validate_records(records):

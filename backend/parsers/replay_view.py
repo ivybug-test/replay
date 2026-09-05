@@ -160,3 +160,35 @@ def window_steps(trajectory, records, low, high, duration):
         if start <= high and end >= low:
             selected.append({'trajectory_id': identity, 'step': step})
     return selected
+
+
+class NativeProjection:
+    """Retain current steps and frame/state events instead of every historical upsert."""
+    def __init__(self):
+        self.steps = {}
+        self.other = []
+
+    def add(self, record):
+        op = record.get('op')
+        identity = record.get('trajectory_id') or 'root'
+        if op in ('append_step', 'begin_step', 'upsert_step'):
+            self.steps[(identity, record['step']['step_id'])] = record['step']
+            return
+        step = self.steps.get((identity, record.get('step_id')))
+        if op == 'tool_execution_start' and step is not None:
+            call = record['tool_call']
+            calls = step.setdefault('tool_calls', [])
+            calls[:] = [c for c in calls if c['tool_call_id'] != call['tool_call_id']] + [call]
+        elif op == 'tool_execution_end' and step is not None:
+            result = record['result']
+            results = step.setdefault('observation', {}).setdefault('results', [])
+            results[:] = [r for r in results if r.get('source_call_id') != result['source_call_id']] + [result]
+        elif op == 'seal_step' and step is not None:
+            step.setdefault('extra', {}).setdefault('osworld_harness', {})['timing'] = record.get('timing') or {}
+        elif op not in ('tool_execution_start', 'tool_execution_end', 'seal_step'):
+            self.other.append(record)
+
+    def records(self):
+        return [{'trace_format': 'atif-stream', 'stream_schema_version': STREAM_VERSION,
+                 'trajectory_id': identity, 'op': 'append_step', 'step': step}
+                for (identity, _), step in self.steps.items()] + self.other

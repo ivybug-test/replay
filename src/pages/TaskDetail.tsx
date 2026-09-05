@@ -10,6 +10,8 @@ import { FORMAT_LABELS, fmtDuration, fmtPct, fmtReward, prettyModel } from '../l
 import { aggregate, useDatasetStore, useLookups } from '../lib/dataset'
 import type { Stat } from '../lib/types'
 import { osworldCapabilities, osworldCapabilityLabel } from '../lib/osworld'
+import TaskExecutionHistory from '../components/TaskExecutionHistory'
+import { standaloneBackend } from '../lib/ossReplay'
 
 export default function TaskDetail() {
   const { taskId } = useParams()
@@ -182,7 +184,9 @@ export default function TaskDetail() {
         )}
 
         {/* Runs */}
-        <section data-tour="task-runs">
+        {task.source === 'osworld' && standaloneBackend ? (
+          <TaskExecutionHistory key={task.id} taskId={task.id.replace(/^osworld-v2-/, '')} />
+        ) : <section data-tour="task-runs">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
               Agent runs ({visibleRuns.length === runs.length ? runs.length : `${visibleRuns.length} of ${runs.length}`})
@@ -277,7 +281,7 @@ export default function TaskDetail() {
               </table>
             </div>
           )}
-        </section>
+        </section>}
       </div>
     </>
   )

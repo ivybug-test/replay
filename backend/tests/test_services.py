@@ -176,6 +176,28 @@ class ServiceTests(unittest.TestCase):
         self.store.artifact('trajectory.json', trajectory())
         self.assertEqual(len(self.replay.get_trajectory(run=RUN, task=TASK)['steps']), 1)
 
+    def test_native_pages_continue_from_consumed_lines_and_projection_drops_old_upserts(self):
+        self.live()
+        ex = self.reader.execution(RUN, TASK)
+        meta = self.reader.read_json(ex, 'trajectory-tail.meta.json')
+        first = self.replay._stream(ex, meta, page_bytes=1)
+        self.assertEqual(len(first['records']), 1)
+        self.assertTrue(first['has_more'])
+        second = self.replay._stream(ex, meta, after=1, page_bytes=1)
+        self.assertFalse(second['has_more'])
+        self.assertEqual(second['start_line'], 1)
+        from backend.parsers.replay_view import NativeProjection
+        projection = NativeProjection()
+        projection.add(patch('begin_step', step=step('old')))
+        projection.add(patch('upsert_step', step=step('new')))
+        projection.add(patch('tool_execution_start', step_id=1, tool_call={
+            'tool_call_id':'c','function_name':'bash','arguments':{}}))
+        projection.add(patch('tool_execution_end', step_id=1, result={'source_call_id':'c','content':'done'}))
+        records = projection.records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['step']['message'], 'new')
+        self.assertEqual(records[0]['step']['observation']['results'][0]['source_call_id'], 'c')
+
     def test_native_window_folds_calls_before_slicing_and_response_limit_is_explicit(self):
         from backend.parsers.replay_view import window_steps
         from unittest.mock import patch as mock_patch

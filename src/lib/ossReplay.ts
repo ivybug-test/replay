@@ -52,6 +52,7 @@ interface TimelineWindow {
 }
 
 export interface ViewerBundle {
+  hasMore?: boolean
   task: Task
   run: Run
   agent: Agent
@@ -99,6 +100,35 @@ export interface ExecutionStateFeed {
 
 const apiBase = String(import.meta.env.VITE_REPLAY_API_BASE ?? '').replace(/\/$/, '')
 const atifLiveCache = new Map<string, AtifLiveStream>()
+export const standaloneBackend = import.meta.env.VITE_REPLAY_BACKEND_MODE === 'standalone'
+
+export interface ExecutionSummary {
+  batch_id: string
+  batch_name?: string | null
+  task_key: string
+  task_id: string
+  status: string
+  model?: string | null
+  framework?: string | null
+  evaluation_status?: string | null
+  agent_outcome?: string | null
+  score: number | null
+  started_at?: string | null
+  duration_ms?: number | null
+}
+
+export interface TaskRunPage {
+  task_id: string
+  runs: ExecutionSummary[]
+  next_cursor: string | null
+  sync: { status: string; last_success: string | null; failed_batches?: number }
+}
+
+export function fetchTaskRuns(taskId: string, filters: { cursor?: string; model?: string; status?: string }, signal?: AbortSignal) {
+  const query = new URLSearchParams({ task_id: taskId, limit: '50' })
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value)
+  return getJson<TaskRunPage>(`/api/task-runs?${query}`, signal)
+}
 
 function apiPath(path: string): string {
   return `${apiBase}${path}`
@@ -163,13 +193,13 @@ export async function fetchViewerBundle(
     getOptionalJson<AtifTrajectory>(`/api/trajectory?${query}`, signal).then(async (terminalTrajectory) => {
       if (terminalTrajectory) {
         atifLiveCache.delete(`${batchId}/${taskKey}`)
-        return { trajectory: terminalTrajectory, work: null }
+        return { trajectory: terminalTrajectory, work: null, hasMore: false }
       }
       let liveError: unknown
       try {
         const live = await getAtifLive(batchId, taskKey, query, signal)
         const trajectory = live ? atifLiveToTrajectory(live) : null
-        if (trajectory) return { trajectory, work: null }
+        if (trajectory) return { trajectory, work: null, hasMore: Boolean(live?.has_more) }
       } catch (error) {
         if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
         liveError = error
@@ -177,17 +207,22 @@ export async function fetchViewerBundle(
         // Start fresh on the next refresh so a recovered stream can take over.
         atifLiveCache.delete(`${batchId}/${taskKey}`)
       }
+      if (standaloneBackend) {
+        if (liveError) throw liveError
+        throw new Error('No trajectory steps are available yet. Retrying…')
+      }
       const work = await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal)
       if (liveError && !work.items.length) {
         throw new Error(`Live trajectory could not be loaded (${String(liveError)}), and no legacy steps are available. Retrying…`)
       }
-      return { trajectory: null, work }
+      return { trajectory: null, work, hasMore: false }
     }),
     getJson<TimelineWindow>(`/api/window?${query}&center_ms=0&before_ms=5000&after_ms=5000`, signal),
   ])
   const taskSummary = batch.tasks.find((task) => task.key === taskKey)
   if (!taskSummary) throw new Error(`Task ${taskKey} is not present in ${batchId}.`)
-  return toViewerBundle(batch, taskSummary, source.work, source.trajectory, window.timeline?.desktop ?? [])
+  return { ...toViewerBundle(batch, taskSummary, source.work, source.trajectory, window.timeline?.desktop ?? []),
+    hasMore: source.hasMore }
 }
 
 export async function fetchExecutionState(

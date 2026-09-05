@@ -1,0 +1,23 @@
+[Unit]
+Description=Replay frontend on public port 18770 (standalone backend migration)
+After=network-online.target replay-backend-18769.service
+Wants=network-online.target replay-backend-18769.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/binqiu/replay-backend-migration
+ExecStart=/usr/bin/node /home/binqiu/replay-backend-migration/server.mjs
+Environment=NODE_ENV=production
+Environment=REPLAY_HOST=0.0.0.0
+Environment=REPLAY_PORT=18770
+Environment=REPLAY_BACKEND_URL=http://127.0.0.1:18769
+Environment=REPLAY_BACKEND_MODE=standalone
+Environment=REPLAY_STATIC_ROOT=dist-migration
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+MemoryHigh=384M
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

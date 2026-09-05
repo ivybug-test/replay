@@ -4,7 +4,8 @@
 产物定位、缓存、执行索引、后台同步和轨迹解析。后端只读 OSS；任务说明、能力标签、
 难度仍由前端维护。运行时不依赖 harness 或旧 oss-replay 的代码目录。
 
-现有前端代理尚未切换。本目录提供可单独运行的新后端，默认开发端口 18769。
+迁移测试版已在独立 worktree 和公网端口 18770 接入本后端，详见
+`deploy/README-migration.md`。原有 18768 服务保持原来的连接。后端监听本机 18769。
 Python 3.10+；OSS、索引和解析层使用标准库，HTTP 层使用 FastAPI/Pydantic/Uvicorn。
 
 ## 启动
@@ -36,14 +37,17 @@ OSS 配置：`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_BUCKET`、
 | `REPLAY_READ_CONCURRENCY` | 4 | 同时进行的 OSS 读取数 |
 | `REPLAY_CONCURRENCY` | 2 | 同时解析回放的数量 |
 | `REPLAY_LIVE_TTL` | 2 | 可变产物及回放视图的缓存秒数 |
-| `REPLAY_OBJECT_MIB` | 64 | 单产物、单次流分块合计或帧事件集合的读取上限 |
+| `REPLAY_OBJECT_MIB` | 64 | 单产物、旧流或帧事件集合的读取上限 |
 | `REPLAY_READ_CACHE_MIB` | 32 | 原始对象缓存容量 |
 | `REPLAY_CACHE_MIB` | 64 | 解析后回放视图缓存容量 |
 
 目录列表缓存 10 秒，目录查询结果缓存上限 8 MiB。不可变分块/帧事件缓存 1 小时，
 仍受容量和条目数限制；缓存按 Python 容器实际占用估算，采用 TTL/LRU 淘汰并合并
 相同 key 的并发读取。超大对象不会驻留缓存。图片读取/响应上限 32 MiB，JSON 响应
-上限 64 MiB；元数据文档上限 8 MiB，轨迹记录最多 100 万条、分块最多 1 万个、
+上限 64 MiB；原生实时响应按约 8 MiB 的分块读取量分页（单个大分块仍受单产物
+上限限制），`has_more` 表示还需继续读取，下一次 after 使用实际已消费的行数。
+原生时间轴投影逐块读取、仅保留最新步骤，累计扫描预算为单产物上限的 8 倍；
+缓存的是投影结果。元数据文档上限 8 MiB，轨迹记录最多 100 万条、分块最多 1 万个、
 桌面帧最多 2 万张。内存限制是各组件预算，不是整个进程 RSS 的硬上限。
 
 ## 目录和职责
@@ -100,7 +104,8 @@ backend/
   仅有原生实时流时，此接口返回 404，由客户端使用 live 接口。
 - `get_atif_live(run, task, after=0)`：原生流按清单读取尚未消费的分块，返回
   `start_line`、`total_lines`、`records`、`terminal` 和 `stream`。游标超过源长度时
-  从 0 重置；公布的分块缺失、内容不符或清单有间隙返回上游错误。
+  从 0 重置；历史上传器的重叠分块只在重复记录及序号一致时去重，超过发布游标
+  的尾部不输出。公布的分块缺失、冲突或清单有间隙返回上游错误。
   旧轨迹使用 ATIF 快照更新，`start_line=0`、`stream.reset=true`，客户端必须替换
   旧记录。这让未完成工具调用可以更新，不会产生伪造的追加游标。
 - `get_window(...)`：按 episode 时间切窗，返回窗口记录、完整语义步骤 `steps`、
@@ -120,8 +125,8 @@ backend/
 `runtime-trace.jsonl`、`runtime-artifacts/runtime-trace.jsonl`、v2 分块尾流和早期滚动尾流。
 完整日志优先于尾流；滚动尾流保留已知的 trace coverage 起点。
 
-后端已完成格式统一，前端仍需单独迁移消费链路并切换代理。前端保留实时增量合并
-和 ATIF → UI 映射；迁移后可退役前端 Agent Work → ATIF 转换和 agent-work 兼容接口。
+迁移测试前端已消费统一 ATIF 并代理到新后端，保留实时增量合并和 ATIF → UI
+映射。兼容旧部署的构建模式仍可使用 Agent Work；原服务尚未退役。
 
 ## HTTP 接口
 

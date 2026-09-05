@@ -9,12 +9,12 @@ from .artifacts import ATIF_PATHS, json_value, relative_path
 from .cache import ReadCache
 from .metadata import TERMINAL, execution_summary
 from .oss_io.client import OssNoSuchKey, OssObjectTooLarge, OssProtocolError
-from .parsers.atif_stream import STREAM_VERSION, descriptors, validate_records, validate_trajectory
+from .parsers.atif_stream import STREAM_VERSION, assemble_records, descriptors, validate_records, validate_trajectory
 from .parsers.execution_state import execution_state_feed, execution_state_extension_feed
 from .parsers.legacy_trace import annotate_for_work, build_episode_work, slice_episode_work
 from .parsers.legacy_to_atif import legacy_to_atif
 from .parsers.replay_view import (agent_stamps, frame_event, milliseconds, portable_frame,
-                                  snapshot_updates, state_extension, state_from_live, window_steps)
+                                  snapshot_updates, state_extension, state_from_live, window_steps, NativeProjection)
 from .services import ImageContent, InvalidQuery, JsonDocument, ResourceNotFound
 
 
@@ -25,19 +25,25 @@ class ReplayService:
         self.slots = threading.BoundedSemaphore(concurrency)
         self.max_frames = max_frames
 
-    def _stream(self, execution, meta, *, after=0, legacy=False):
+    def _stream(self, execution, meta, *, after=0, legacy=False, compact=False, page_bytes=None):
         chunks = descriptors(meta, legacy=legacy)
         start = after if after <= meta['total_lines'] else 0
         records, used = [], 0
+        recovery = not legacy and any(chunk['start'] != (chunks[i-1]['start'] + chunks[i-1]['count'] if i else 0)
+                                     for i, chunk in enumerate(chunks))
+        recovery = recovery or (not legacy and bool(chunks) and chunks[-1]['start'] + chunks[-1]['count'] != meta['total_lines'])
+        parts = []
+        projection = NativeProjection() if compact else None
+        budget = self.reader.max_object_bytes * (8 if compact else 1)
         name = 'trace-tail.jsonl' if legacy else 'trajectory-tail.jsonl'
         for chunk in chunks:
             end = chunk['start'] + chunk['count']
-            if end <= start:
+            if end <= start and not recovery:
                 continue
             path = f"{name}.chunks/{chunk['start']:012d}-{end:012d}.jsonl"
             try:
                 raw = self.reader.read_bytes(execution, path, immutable=True,
-                                             max_bytes=self.reader.max_object_bytes - used)
+                                             max_bytes=min(self.reader.max_object_bytes, budget - used))
             except OssNoSuchKey as exc:
                 raise OssProtocolError('Published stream chunk is missing') from exc
             used += len(raw)
@@ -46,10 +52,30 @@ class ReplayService:
                 raise OssProtocolError('Chunk contents disagree with manifest')
             if not legacy:
                 validate_records(parsed)
-            records.extend(parsed[max(0, start - chunk['start']):])
+            if recovery:
+                parts.append(parsed)
+            elif projection is not None:
+                for record in parsed:
+                    projection.add(record)
+            else:
+                records.extend(parsed[max(0, start - chunk['start']):])
+                if page_bytes is not None and used >= page_bytes:
+                    break
+        stream = dict(meta.get('stream') or {})
+        if recovery:
+            records, duplicates = assemble_records(meta, parts)
+            records = records[start:]
+            if duplicates:
+                stream['recovered_duplicate_records'] = duplicates
+            if projection is not None:
+                for record in records:
+                    projection.add(record)
+        if projection is not None:
+            records = projection.records()
+        has_more = not compact and start + len(records) < meta['total_lines']
         return {'trace_format': 'atif-stream', 'stream_schema_version': STREAM_VERSION,
                 'start_line': start, 'total_lines': meta['total_lines'], 'records': records,
-                'terminal': bool(meta.get('terminal')), 'stream': meta.get('stream') or {}}
+                'terminal': bool(meta.get('terminal')), 'has_more': has_more, 'stream': stream}
 
     def _legacy_records(self, execution):
         records = None
@@ -148,7 +174,7 @@ class ReplayService:
             else:
                 manifest = self.reader.read_json(ex, 'trajectory-tail.meta.json', optional=True)
                 if manifest is not None:
-                    live = self._stream(ex, manifest)
+                    live = self._stream(ex, manifest, compact=True)
                     records = live['records']
                     frames = [frame_event(r['frame']) for r in records if r['op'] == 'append_desktop_frame']
                     terminal = live['terminal']
@@ -220,6 +246,12 @@ class ReplayService:
 
     def get_trajectory(self, *, run: str, task: str) -> JsonDocument:
         """Return complete native ATIF or a normalized snapshot of legacy work."""
+        ex = self.reader.execution(run, task)
+        native, _ = self.reader.native_trajectory(ex)
+        if native is None and self.reader.read_json(ex, 'trajectory-tail.meta.json', optional=True) is not None:
+            # A live execution need not download its history to report that the
+            # terminal document has not been published yet.
+            raise ResourceNotFound('Complete ATIF document not published yet')
         view = self._view(run, task)
         if not view['trajectory'] or not view['trajectory']['steps']:
             raise ResourceNotFound('Complete ATIF document not available; use live endpoint')
@@ -233,7 +265,7 @@ class ReplayService:
         manifest = self.reader.read_json(ex, 'trajectory-tail.meta.json', optional=True)
         if manifest is not None:
             with self.slots:
-                return self._stream(ex, manifest, after=after)
+                return self._stream(ex, manifest, after=after, page_bytes=8 * 1024 * 1024)
         view = self._view(run, task)
         if not view['trajectory'] or not view['trajectory']['steps']:
             raise ResourceNotFound('No trajectory records yet')

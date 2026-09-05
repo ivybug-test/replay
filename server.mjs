@@ -3,14 +3,14 @@ import { stat } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readAtifLive } from './server/atifLive.mjs'
 import { proxyApi } from './server/proxyApi.mjs'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
-const staticRoot = path.join(projectRoot, 'dist')
+const staticRoot = path.resolve(projectRoot, process.env.REPLAY_STATIC_ROOT || 'dist')
 const host = process.env.REPLAY_HOST || '0.0.0.0'
 const port = Number(process.env.REPLAY_PORT || '18768')
 const backend = new URL(process.env.REPLAY_BACKEND_URL || 'http://127.0.0.1:18767')
+const standalone = process.env.REPLAY_BACKEND_MODE === 'standalone'
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error(`Invalid REPLAY_PORT: ${process.env.REPLAY_PORT}`)
@@ -97,13 +97,14 @@ const server = http.createServer(async (request, response) => {
     sendText(response, 200, 'ok\n')
     return
   }
-  if (url.pathname === '/api/atif-live') {
+  if (!standalone && url.pathname === '/api/atif-live') {
     if (request.method !== 'GET') {
       sendJson(response, 405, { error: 'Method not allowed' })
       return
     }
     try {
       const after = Number(url.searchParams.get('after') || '0')
+      const { readAtifLive } = await import('./server/atifLive.mjs')
       const result = await readAtifLive(
         url.searchParams.get('run'), url.searchParams.get('task'), after,
       )

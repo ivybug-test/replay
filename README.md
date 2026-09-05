@@ -5,9 +5,12 @@ It keeps the upstream task browser, film-style trajectory view, upload flow,
 specialized renderers and AFT panels, and adds a live integration with the
 existing OSS Replay backend in `/home/binqiu/oss-replay`.
 
-A standalone read-only OSS API is implemented in [backend/README.md](./backend/README.md),
-with catalog/history queries and native/legacy ATIF replay. The existing frontend
-proxy has not yet been switched to this backend.
+This branch runs the standalone OSS backend migration in the independent worktree
+`/home/binqiu/replay-backend-migration`. Test it at
+[task 003](http://47.120.53.174:18770/tasks/osworld-v2-003) or
+[Live runs](http://47.120.53.174:18770/live). See
+[deployment notes](./deploy/README-migration.md) and [backend documentation](./backend/README.md).
+The original services on ports 18768/18767 remain running.
 
 The first migration slice is available at `/live`: it lists real OSS runs,
 opens their tasks, loads the complete semantic Agent Work sequence, and shows
