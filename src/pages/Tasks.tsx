@@ -18,6 +18,8 @@ const DIFFICULTY: Record<string, string> = {
   hard: 'bg-rose-500/15 text-rose-300',
 }
 
+const OSWORLD_VENDOR_ID = 'osworld-v2'
+
 interface Badge { key: string; Icon: LucideIcon; cls: string; title: string }
 
 const LEGEND: Badge[] = [
@@ -89,6 +91,8 @@ export default function Tasks() {
   if (!data) return <Loading />
 
   const tasks = visibleTasks(data, isMember)
+  const orderedVendors = [...data.vendors]
+    .sort((a, b) => Number(b.id === OSWORLD_VENDOR_ID) - Number(a.id === OSWORLD_VENDOR_ID))
   const osworldTasks = tasks.filter((task) => task.source === 'osworld')
   const capabilityCounts = new Map<string, number>()
   for (const task of osworldTasks) {
@@ -129,16 +133,20 @@ export default function Tasks() {
             ))}
           </div>
         </details>
-        {data.vendors.map((vendor) => {
+        {orderedVendors.map((vendor) => {
           const cats = byVendor.get(vendor.id)
           if (!cats) return null
           const vendorTaskCount = [...cats.values()].reduce((n, ts) => n + ts.length, 0)
           const vendorTotal = tasks.filter((task) => task.vendorId === vendor.id).length
-          const isCollapsed = collapsed[vendor.id]
+          const isCollapsed = collapsed[vendor.id] ?? vendor.id !== OSWORLD_VENDOR_ID
           return (
             <section key={vendor.id} className="card overflow-hidden">
               <button
-                onClick={() => setCollapsed((c) => ({ ...c, [vendor.id]: !c[vendor.id] }))}
+                onClick={() => setCollapsed((current) => ({
+                  ...current,
+                  [vendor.id]: !(current[vendor.id] ?? vendor.id !== OSWORLD_VENDOR_ID),
+                }))}
+                aria-expanded={!isCollapsed}
                 className="flex w-full items-center gap-3 bg-ink-800/50 px-5 py-3 text-left hover:bg-ink-800"
               >
                 <span className="text-zinc-500">{isCollapsed ? '▸' : '▾'}</span>
@@ -157,7 +165,7 @@ export default function Tasks() {
                       {vendor.coverage}
                     </div>
                   )}
-                  {vendor.id === 'osworld-v2' && (
+                  {vendor.id === OSWORLD_VENDOR_ID && (
                     <div className="space-y-2 bg-ink-900/40 px-5 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Capability filters</span>
