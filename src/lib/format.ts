@@ -1,6 +1,7 @@
 export const FORMAT_LABELS: Record<string, string> = {
   atif: 'ATIF',
   harbor: 'Harbor',
+  osworld: 'OSWorld 2.0',
   // `snorkel` and `fleet` are legacy RunFormat variants that aren't produced
   // by the bundled ingest but remain renderable so forks that pipe in those
   // shapes don't have to add labels.

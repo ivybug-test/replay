@@ -1,5 +1,5 @@
 import { atifTrajectoryToSteps } from './atifToViewer'
-import { observerEvents } from './observerFeed'
+import { observerEvents, plannerEvents } from './observerFeed'
 import { parseAtifTrajectory, type AtifTrajectory } from './atif'
 import { atifLiveToTrajectory, type AtifLiveStream } from './atifLive'
 import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
@@ -68,13 +68,13 @@ export interface DesktopFrame {
 
 export type ExecutionStateKind =
   | 'declaration' | 'goal' | 'action' | 'checkpoint'
-  | 'attempt' | 'evidence' | 'failure' | 'recovery' | 'observer'
+  | 'attempt' | 'evidence' | 'failure' | 'recovery' | 'observer' | 'planner'
 
 export interface ExecutionStateEvent {
   sequence: number
   episode_elapsed_ms: number
   time?: string | null
-  event: `execution_state_${ExecutionStateKind}` | 'observer_interval'
+  event: `execution_state_${ExecutionStateKind}` | 'observer_interval' | 'planner_state'
   version?: string
   status?: string
   transition?: string
@@ -165,12 +165,23 @@ export async function fetchViewerBundle(
         atifLiveCache.delete(`${batchId}/${taskKey}`)
         return { trajectory: terminalTrajectory, work: null }
       }
-      const live = await getAtifLive(batchId, taskKey, query, signal)
-      const trajectory = live ? atifLiveToTrajectory(live) : null
-      return {
-        trajectory,
-        work: trajectory ? null : await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal),
+      let liveError: unknown
+      try {
+        const live = await getAtifLive(batchId, taskKey, query, signal)
+        const trajectory = live ? atifLiveToTrajectory(live) : null
+        if (trajectory) return { trajectory, work: null }
+      } catch (error) {
+        if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
+        liveError = error
+        // A broken live manifest must not prevent reading the legacy trace.
+        // Start fresh on the next refresh so a recovered stream can take over.
+        atifLiveCache.delete(`${batchId}/${taskKey}`)
       }
+      const work = await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal)
+      if (liveError && !work.items.length) {
+        throw new Error(`Live trajectory could not be loaded (${String(liveError)}), and no legacy steps are available. Retrying…`)
+      }
+      return { trajectory: null, work }
     }),
     getJson<TimelineWindow>(`/api/window?${query}&center_ms=0&before_ms=5000&after_ms=5000`, signal),
   ])
@@ -332,11 +343,14 @@ function toViewerBundle(
     failureReason: taskSummary.error ?? null,
   }
   const reports = trajectory ? observerEvents(trajectory) : []
+  const planUpdates = trajectory ? plannerEvents(trajectory) : []
+  const stateEvents = [...planUpdates, ...reports]
+    .sort((a, b) => a.episode_elapsed_ms - b.episode_elapsed_ms || a.sequence - b.sequence)
   const executionState: ExecutionStateFeed | undefined = trajectory ? {
-    version: 'observer', source: 'trajectory_extra',
+    version: 'harness-state/v1', source: 'trajectory_extra',
     duration_ms: traceDurationMs, terminal: taskSummary.status !== 'running',
     task_status: taskSummary.status,
-    counts: { observer: reports.length }, events: reports,
+    counts: { observer: reports.length, planner: planUpdates.length }, events: stateEvents,
   } : undefined
   return { task, run, agent, vendor, desktopTimeline, executionState }
 }

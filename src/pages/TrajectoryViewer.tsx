@@ -8,6 +8,8 @@ import GradePanel from '../components/GradePanel'
 import Markdown from '../components/Markdown'
 import EnvironmentStage from '../components/EnvironmentStage'
 import ExecutionStatePanel from '../components/ExecutionStatePanel'
+import StepTimeline from '../components/StepTimeline'
+import { stepTitle } from '../lib/stepTree'
 import CodeBlock from '../components/CodeBlock'
 import { ArcGridView, tryParseArcGrids } from '../components/ArcGrid'
 import AftPanel from '../components/AftPanel'
@@ -137,14 +139,6 @@ const DECISION_STYLES: Record<LabelDecision, string> = {
   unsure: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
 }
 
-function stepTitle(s: Step): string {
-  if (s.toolCalls?.length) return s.toolCalls.map((t) => t.name).join(', ')
-  if (s.role === 'tool') return `${s.toolName ?? 'tool'} result`
-  if (s.text) return s.text.replace(/\s+/g, ' ').slice(0, 60)
-  if (s.observation) return 'observation'
-  return s.role
-}
-
 function stepAnchorMs(step: Step): number {
   return Math.max(0, (step.endSec ?? step.tSec ?? 0) * 1000)
 }
@@ -240,6 +234,8 @@ export default function TrajectoryViewer({
   const stepLabel = useMemo(() => labels.find((l) => l.stepIndex === activeStep), [labels, activeStep])
   const stepCount = loadedSteps.length
   const hasDesktopTimeline = !!desktopTimeline?.length
+  const visibleStateEventCount = executionState?.events.filter(event =>
+    event.event === 'observer_interval' || event.event === 'planner_state').length ?? 0
   const timedDurationMs = useMemo(() => Math.max(
     (runForSteps?.durationSec ?? 0) * 1000,
     desktopTimeline?.[desktopTimeline.length - 1]?.atMs ?? 0,
@@ -421,7 +417,7 @@ export default function TrajectoryViewer({
   }
 
   return (
-    <>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <PageHeader
         title={`${agent ? prettyModel(agent.model) : run.agentId}`}
         subtitle={`${task.title} · ${erun.steps.length} steps · ${run.turns} turns · ${fmtDuration(run.durationSec)}${run.tokens?.prompt ? ` · ${fmtTokens(run.tokens.prompt)} prompt tok` : ''}`}
@@ -444,6 +440,7 @@ export default function TrajectoryViewer({
         timeBased={hasDesktopTimeline}
         title={stepTitle(step)}
         role={step.role}
+        actor={step.agent?.label}
         elapsedSec={hasDesktopTimeline ? desktopCursorMs / 1000 : step.tSec ?? null}
         totalSec={run.durationSec}
         onPlay={() => {
@@ -463,8 +460,9 @@ export default function TrajectoryViewer({
         onToggleSteps={toggleTimeline}
       />
 
-      <PanelGroup direction="horizontal" className="h-[calc(100%-89px-57px)]" autoSaveId="traj-cols">
+      <PanelGroup direction="horizontal" className="min-h-0 flex-1" style={{ flex: 1 }} autoSaveId="traj-cols">
         <Panel
+          id="trajectory-steps" order={1} className="min-w-0"
           ref={timelineRef}
           collapsible
           collapsedSize={0}
@@ -474,63 +472,15 @@ export default function TrajectoryViewer({
           onExpand={() => setTimelineCollapsed(false)}
         >
         {/* Step timeline */}
-        <div data-tour="timeline" className="h-full overflow-y-auto p-3">
-          <div className="mb-2 px-1 text-xs uppercase tracking-wide text-zinc-500">
-            {erun.steps.length} steps
-          </div>
-          <ol className="space-y-1">
-            {erun.steps.map((s) => {
-              const lbl = labels.find((l) => l.stepIndex === s.index)
-              return (
-                <li key={s.index}>
-                  <button
-                    onClick={() => { setPlaying(false); selectStep(s.index) }}
-                    className={clsx(
-                      'flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors',
-                      s.index === activeStep ? 'bg-ink-800 ring-1 ring-accent/40' : 'hover:bg-ink-800/50',
-                    )}
-                  >
-                    <span className={clsx('mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-[11px]', ROLE_STYLES[s.role] ?? 'bg-ink-700')}>
-                      {ROLE_GLYPH[s.role] ?? '•'}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-xs text-zinc-500">#{s.index + 1}</span>
-                        {s.edits?.length ? (
-                          <span className="chip bg-emerald-500/15 text-emerald-300" title="environment change">▦</span>
-                        ) : s.toolCalls?.length ? (
-                          <span className="chip bg-violet-500/15 text-violet-300">tool</span>
-                        ) : null}
-                        {s.mutations?.length ? (
-                          <span className="chip bg-accent/15 text-accent" title="artifact change">±{s.mutations.length}</span>
-                        ) : null}
-                        {s.images?.length ? (
-                          <span className="chip bg-sky-500/15 text-sky-300" title={`${s.images.length} message image${s.images.length === 1 ? '' : 's'}`}>img {s.images.length}</span>
-                        ) : null}
-                        {aftSteps.has(s.index) ? (
-                          <span className="chip bg-rose-500/20 text-rose-300" title="AFT-flagged failure step">AFT</span>
-                        ) : null}
-                        {lbl && (
-                          <span className={clsx('h-2 w-2 rounded-full', {
-                            'bg-emerald-400': lbl.decision === 'correct',
-                            'bg-rose-400': lbl.decision === 'incorrect',
-                            'bg-amber-400': lbl.decision === 'unsure',
-                          })} />
-                        )}
-                      </span>
-                      <span className="block truncate text-zinc-200">{stepTitle(s)}</span>
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ol>
+        <div hidden={timelineCollapsed} className="h-full min-w-0">
+          <StepTimeline key={replayKey} steps={erun.steps} activeStep={activeStep} labels={labels} aftSteps={aftSteps}
+            onSelect={(index) => { setPlaying(false); selectStep(index) }} onCollapse={toggleTimeline} />
         </div>
         </Panel>
         <PanelResizeHandle className="w-1 bg-ink-700 transition-colors hover:bg-accent/50" />
 
         {/* Environment stage — the "film screen" */}
-        <Panel defaultSize={53} minSize={25}>
+        <Panel id="trajectory-stage" order={2} defaultSize={53} minSize={25} className="min-w-0">
         <div data-tour="stage" className="flex h-full min-w-0 flex-col overflow-hidden">
           {hasDesktopTimeline && (
             <DesktopTimelineBar
@@ -555,17 +505,17 @@ export default function TrajectoryViewer({
         <PanelResizeHandle className="w-1 bg-ink-700 transition-colors hover:bg-accent/50" />
 
         {/* Right rail: Step detail / Artifacts / Analysis / Label */}
-        <Panel defaultSize={28} minSize={16}>
+        <Panel id="trajectory-detail" order={3} defaultSize={28} minSize={16} className="min-w-0">
         <div className="flex h-full flex-col overflow-hidden border-l border-ink-700">
           <div data-tour="rail-tabs" className="flex border-b border-ink-700">
             {([
               ['step', 'Step'],
-              ['state', `State${executionState?.events.filter(event => event.event === 'observer_interval').length ? ` (${executionState.events.filter(event => event.event === 'observer_interval').length})` : ''}`],
+              ['state', `State${visibleStateEventCount ? ` (${visibleStateEventCount})` : ''}`],
               ['analysis', 'Reward & Verifier log'],
               ['artifacts', `Changes${run.artifacts?.length ? ` (${run.artifacts.length})` : ''}`],
               ['aft', 'AFT'],
               ['labels', 'Label/Note'],
-            ] as const).filter(([p]) => p !== 'state' || !!executionState?.events.filter(event => event.event === 'observer_interval').length || !!loadExecutionState).map(([p, lbl]) => (
+            ] as const).filter(([p]) => p !== 'state' || visibleStateEventCount > 0 || !!loadExecutionState).map(([p, lbl]) => (
               <button
                 key={p}
                 data-tour={`tab-${p}`}
@@ -593,7 +543,7 @@ export default function TrajectoryViewer({
             ) : panel === 'state' && executionState ? (
               <ExecutionStatePanel
                 feed={executionState}
-                playheadMs={Math.floor((hasDesktopTimeline ? desktopCursorMs : (step.tSec ?? 0) * 1000) / 1000) * 1000}
+                playheadMs={hasDesktopTimeline ? desktopCursorMs : (step.tSec ?? 0) * 1000}
                 onJump={jumpToExecutionState}
               />
             ) : panel === 'analysis' ? (
@@ -672,7 +622,7 @@ export default function TrajectoryViewer({
         </div>
         </Panel>
       </PanelGroup>
-    </>
+    </div>
   )
 }
 
@@ -747,10 +697,11 @@ function DesktopTimelineBar({
 }
 
 function Transport({
-  active, count, playing, speed, timeBased, title, role, elapsedSec, totalSec, stepsCollapsed,
+  active, count, playing, speed, timeBased, title, role, actor, elapsedSec, totalSec, stepsCollapsed,
   onPlay, onPrev, onNext, onSeek, onSpeed, onToggleSteps,
 }: {
   active: number; count: number; playing: boolean; speed: number; timeBased: boolean; title: string; role: string
+  actor?: string
   elapsedSec: number | null; totalSec: number | null; stepsCollapsed: boolean
   onPlay: () => void; onPrev: () => void; onNext: () => void
   onSeek: (i: number) => void; onSpeed: (s: number) => void; onToggleSteps: () => void
@@ -759,7 +710,11 @@ function Transport({
   return (
     <div data-tour="transport" className="flex items-center gap-3 border-b border-ink-700 bg-ink-900/60 px-4 py-2.5">
       <button
+        type="button"
         onClick={onToggleSteps}
+        aria-expanded={!stepsCollapsed}
+        aria-controls="trajectory-steps"
+        aria-label={stepsCollapsed ? 'Show steps panel' : 'Hide steps panel'}
         className="btn-ghost px-2"
         title={stepsCollapsed ? 'Show steps panel' : 'Hide steps panel'}
       >
@@ -793,6 +748,7 @@ function Transport({
         <span className="shrink-0 font-mono text-xs text-zinc-500" title="total wall-clock time">⏱ {fmtDuration(totalSec)} total</span>
       ) : null}
       <span className={clsx('chip shrink-0 capitalize', ROLE_STYLES[role])}>{role}</span>
+      {actor && <span className="max-w-36 truncate text-xs text-sky-300" title={actor}>{actor}</span>}
       <span className="min-w-0 flex-1 truncate text-sm text-zinc-400">{title}</span>
       <div className="flex shrink-0 items-center gap-1 text-xs text-zinc-500" title={timeBased ? 'Recorded wall-clock playback speed' : 'Steps advanced per second'}>
         {timeBased ? 'wall time' : 'step speed'}
@@ -818,6 +774,7 @@ function StepPanel({ step }: { step: Step }) {
           {ROLE_GLYPH[step.role] ?? '•'}
         </span>
         <h2 className="text-sm font-semibold capitalize text-white">{step.role}</h2>
+        {step.agent && <span className="chip bg-sky-500/15 text-sky-300" title={step.agent.id}>{step.agent.label}</span>}
         <span className="text-xs text-zinc-500">step {step.index + 1}</span>
         {step.tokens?.completion != null && (
           <span className="ml-auto text-[11px] text-zinc-500">

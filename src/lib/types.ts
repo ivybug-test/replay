@@ -3,7 +3,7 @@
 // (ATIF trajectories, Harbor task dirs, OpenAI-messages rollouts) into public/dataset.json.
 // ---------------------------------------------------------------------------
 
-export type RunFormat = 'atif' | 'snorkel' | 'harbor' | 'fleet'
+export type RunFormat = 'atif' | 'snorkel' | 'harbor' | 'fleet' | 'osworld'
 export type RunStatus = 'passed' | 'failed' | 'partial' | 'error' | 'completed' | 'running' | 'interrupted'
 export type StepRole = 'user' | 'agent' | 'assistant' | 'system' | 'tool'
 
@@ -87,9 +87,25 @@ export interface Mutation {
   detail?: string
 }
 
+export interface StepAgent {
+  id: string
+  label: string
+  role?: string
+  origin?: string
+  trajectoryId?: string
+  parentId?: string
+  parentLabel?: string
+  delegationStepIndex?: number
+  delegationTool?: string
+}
+
 export interface Step {
   index: number
   role: StepRole
+  /** Execution identity; distinct from the system/user/agent message role. */
+  agent?: StepAgent
+  sourceStepId?: number
+  turn?: number
   text?: string | null
   reasoning?: string | null
   toolCalls?: ToolCall[] | null

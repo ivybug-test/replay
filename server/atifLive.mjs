@@ -1,12 +1,13 @@
 import OSS from 'ali-oss'
 import { readFile } from 'node:fs/promises'
+import { isDeepStrictEqual } from 'node:util'
+import { BufferCache } from './bufferCache.mjs'
 
 const STREAM_VERSION = 'osworld-atif-stream/v1'
 const MANIFEST_VERSION = 'osworld-atif-stream-manifest/v1'
 const MAX_LINES = 1_000_000
 const MAX_CHUNKS = 10_000
-const MAX_CACHED_STREAMS = 32
-const cache = new Map()
+const cache = new BufferCache()
 
 function parseEnv(text) {
   const values = {}
@@ -45,15 +46,21 @@ async function ossSettings() {
   return settings
 }
 
-const settingsPromise = ossSettings()
-const clientPromise = settingsPromise.then((settings) => new OSS({
-  region: settings.region,
-  accessKeyId: settings.accessKeyId,
-  accessKeySecret: settings.accessKeySecret,
-  bucket: settings.bucket,
-  endpoint: settings.endpoint,
-  authorizationV4: true,
-}))
+let settingsPromise
+let clientPromise
+function getSettings() {
+  return settingsPromise ??= ossSettings()
+}
+function getClient() {
+  return clientPromise ??= getSettings().then((settings) => new OSS({
+    region: settings.region,
+    accessKeyId: settings.accessKeyId,
+    accessKeySecret: settings.accessKeySecret,
+    bucket: settings.bucket,
+    endpoint: settings.endpoint,
+    authorizationV4: true,
+  }))
+}
 
 function validSegment(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(value)
@@ -64,7 +71,7 @@ function notFound(error) {
 }
 
 async function getObject(key) {
-  const client = await clientPromise
+  const client = await getClient()
   try {
     const result = await client.get(key)
     return Buffer.isBuffer(result.content) ? result.content : Buffer.from(result.content)
@@ -74,7 +81,7 @@ async function getObject(key) {
   }
 }
 
-function parseManifest(body) {
+export function parseManifest(body) {
   let value
   try { value = JSON.parse(body.toString('utf8')) }
   catch { throw new Error('ATIF live manifest is not valid JSON') }
@@ -89,18 +96,25 @@ function parseManifest(body) {
     throw new Error('ATIF live manifest violates its protocol')
   }
   let cursor = 0
+  let previousStart = -1
   for (const descriptor of value.chunks) {
-    if (!Number.isInteger(descriptor?.start) || descriptor.start !== cursor
-        || !Number.isInteger(descriptor?.count) || descriptor.count < 1) {
+    if (!Number.isInteger(descriptor?.start) || descriptor.start <= previousStart
+        || descriptor.start > cursor
+        || !Number.isInteger(descriptor?.count) || descriptor.count < 1
+        || descriptor.start + descriptor.count <= cursor
+        || descriptor.start + descriptor.count > MAX_LINES) {
       throw new Error('ATIF live manifest has a non-contiguous chunk list')
     }
-    cursor += descriptor.count
+    previousStart = descriptor.start
+    cursor = descriptor.start + descriptor.count
   }
-  if (cursor !== value.total_lines) throw new Error('ATIF live manifest total_lines does not match its chunks')
+  if (value.total_lines > cursor || (value.chunks.length && value.total_lines <= previousStart)) {
+    throw new Error('ATIF live manifest total_lines does not match its chunks')
+  }
   return value
 }
 
-function parseChunk(body, descriptor) {
+export function parseChunk(body, descriptor) {
   const records = body.toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
   if (records.length !== descriptor.count || records.some((record) => (
     record?.trace_format !== 'atif-stream' || record?.stream_schema_version !== STREAM_VERSION
@@ -110,10 +124,55 @@ function parseChunk(body, descriptor) {
   return records
 }
 
+// Older uploaders included records past their dependency-ready boundary, then
+// published them again in the next chunk. Only identical, sequenced overlaps
+// are recoverable; gaps and conflicting records must still fail closed.
+export function assembleRecords(manifest, chunks) {
+  const records = []
+  let duplicates = 0
+  for (let index = 0; index < manifest.chunks.length; index++) {
+    const descriptor = manifest.chunks[index]
+    const chunk = chunks[index]
+    if (!chunk || chunk.length !== descriptor.count) throw new Error('ATIF live chunk violates its manifest')
+    for (let offset = 0; offset < chunk.length; offset++) {
+      const position = descriptor.start + offset
+      const record = chunk[offset]
+      if (position >= manifest.total_lines) {
+        if (record.stream_sequence !== position + 1) throw new Error('ATIF live unpublished tail has an invalid sequence')
+        continue // Never expose records beyond the published, dependency-ready cursor.
+      }
+      if (position < records.length) {
+        if (record.stream_sequence !== position + 1 || !isDeepStrictEqual(records[position], record)) {
+          throw new Error('ATIF live chunks contain conflicting overlapping records')
+        }
+        duplicates++
+      } else {
+        if (position !== records.length) throw new Error('ATIF live chunks contain a gap')
+        records.push(record)
+      }
+    }
+  }
+  if (records.length !== manifest.total_lines) throw new Error('ATIF live records do not match total_lines')
+  return { records, duplicates }
+}
+
 function chunkName(root, descriptor) {
   const start = String(descriptor.start).padStart(12, '0')
   const end = String(descriptor.start + descriptor.count).padStart(12, '0')
   return `${root}/trajectory-tail.jsonl.chunks/${start}-${end}.jsonl`
+}
+
+export async function loadChunks(manifest, root, readObject = getObject, bufferCache = cache) {
+  return Promise.all(manifest.chunks.map(async (descriptor) => {
+    const name = chunkName(root, descriptor)
+    const cached = bufferCache.get(name)
+    if (cached) return parseChunk(cached, descriptor)
+    const body = await readObject(name)
+    if (!body) throw new Error(`ATIF live chunk is missing: ${descriptor.start}`)
+    const records = parseChunk(body, descriptor)
+    bufferCache.set(name, body)
+    return records
+  }))
 }
 
 export async function readAtifLive(run, task, after = 0) {
@@ -123,23 +182,13 @@ export async function readAtifLive(run, task, after = 0) {
   if (!Number.isInteger(after) || after < 0 || after > MAX_LINES) {
     return { status: 400, body: { error: 'Invalid ATIF live cursor' } }
   }
-  const settings = await settingsPromise
+  const settings = await getSettings()
   const root = [settings.prefix, 'harness', run, 'tasks', task].filter(Boolean).join('/')
   const manifestBody = await getObject(`${root}/trajectory-tail.meta.json`)
   if (!manifestBody) return { status: 404, body: { error: 'ATIF live stream not found' } }
   const manifest = parseManifest(manifestBody)
-  const entry = cache.get(root) ?? new Map()
-  cache.delete(root)
-  cache.set(root, entry)
-  if (cache.size > MAX_CACHED_STREAMS) cache.delete(cache.keys().next().value)
-  await Promise.all(manifest.chunks.map(async (descriptor) => {
-    const name = chunkName(root, descriptor)
-    if (entry.has(name)) return
-    const body = await getObject(name)
-    if (!body) throw new Error(`ATIF live chunk is missing: ${descriptor.start}`)
-    entry.set(name, parseChunk(body, descriptor))
-  }))
-  const records = manifest.chunks.flatMap((descriptor) => entry.get(chunkName(root, descriptor)) ?? [])
+  const chunks = await loadChunks(manifest, root)
+  const { records, duplicates } = assembleRecords(manifest, chunks)
   const startLine = after <= records.length ? after : 0
   return {
     status: 200,
@@ -149,7 +198,7 @@ export async function readAtifLive(run, task, after = 0) {
       total_lines: manifest.total_lines,
       start_line: startLine,
       terminal: Boolean(manifest.terminal),
-      stream: manifest.stream ?? {},
+      stream: { ...manifest.stream, ...(duplicates ? { recovered_duplicate_records: duplicates } : {}) },
       records: records.slice(startLine),
     },
   }

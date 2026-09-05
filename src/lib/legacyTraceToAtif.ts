@@ -216,6 +216,7 @@ function modelInputStep(item: LegacyWorkItem, context: LegacyTraceContext): Omit
         provenance: {
           source_format: 'oss-agent-work', kind: 'model_input',
           work_id: item.id, agent_id: item.agent_id,
+          role: item.role, origin: item.origin,
         },
       },
     },

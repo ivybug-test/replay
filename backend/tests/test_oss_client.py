@@ -1,7 +1,7 @@
 """OSS wire contract, independent signature vectors, and bounded-read failures.
 
 Run from the repository root:
-    python3 -m unittest discover -s backend/tests -v
+    python3 -m unittest discover -s backend/tests -p test_oss_client.py -v
 No credentials, OSS writes, external services, or third-party packages needed.
 """
 

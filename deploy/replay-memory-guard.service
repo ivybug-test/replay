@@ -1,0 +1,10 @@
+[Unit]
+Description=Protect development host from observation service memory pressure
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/bin/replay-memory-guard.py
+Environment=REPLAY_GUARD_STATE_DIR=%h/.config/replay-memory-guard
+UMask=0077
+TimeoutStartSec=45s
+SyslogIdentifier=replay-memory-guard

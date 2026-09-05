@@ -4,6 +4,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readAtifLive } from './server/atifLive.mjs'
+import { proxyApi } from './server/proxyApi.mjs'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const staticRoot = path.join(projectRoot, 'dist')
@@ -33,23 +34,6 @@ const contentTypes = new Map([
   ['.woff2', 'font/woff2'],
 ])
 
-const hopByHopHeaders = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-])
-
-function safeHeaders(headers) {
-  return Object.fromEntries(
-    Object.entries(headers).filter(([name]) => !hopByHopHeaders.has(name.toLowerCase())),
-  )
-}
-
 function sendText(response, status, text, contentType = 'text/plain; charset=utf-8') {
   const body = Buffer.from(text)
   response.writeHead(status, {
@@ -62,37 +46,6 @@ function sendText(response, status, text, contentType = 'text/plain; charset=utf
 
 function sendJson(response, status, value) {
   sendText(response, status, `${JSON.stringify(value)}\n`, 'application/json; charset=utf-8')
-}
-
-function proxyApi(request, response) {
-  const target = new URL(request.url, backend)
-  const headers = safeHeaders(request.headers)
-  headers.host = target.host
-  headers['x-forwarded-host'] = request.headers.host || ''
-  headers['x-forwarded-proto'] = 'http'
-
-  const upstream = http.request(target, { method: request.method, headers }, (upstreamResponse) => {
-    response.writeHead(
-      upstreamResponse.statusCode || 502,
-      safeHeaders(upstreamResponse.headers),
-    )
-    upstreamResponse.pipe(response)
-  })
-  upstream.setTimeout(0)
-  upstream.on('error', (error) => {
-    if (!response.headersSent) {
-      sendText(
-        response,
-        502,
-        JSON.stringify({ error: 'Replay backend unavailable', detail: error.message }),
-        'application/json; charset=utf-8',
-      )
-    } else {
-      response.destroy(error)
-    }
-  })
-  request.on('aborted', () => upstream.destroy())
-  request.pipe(upstream)
 }
 
 async function resolveStaticFile(pathname) {
@@ -161,7 +114,7 @@ const server = http.createServer(async (request, response) => {
     return
   }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
-    proxyApi(request, response)
+    proxyApi(request, response, backend)
     return
   }
   void serveStatic(request, response, url.pathname)

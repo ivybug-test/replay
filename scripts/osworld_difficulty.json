@@ -1,0 +1,440 @@
+{
+  "source_url": "http://47.120.53.174/osworld-2.html",
+  "retrieved_at": "2026-09-04T07:01:01.610203+00:00",
+  "source_sha256": "5e178522c4995dd0acf34a56f2f9d71bd83c3c2ee4165ca819c8bf814c0215f3",
+  "basis": "Knowledge-base per-task baseline difficulty labels (not human completion time).",
+  "tasks": {
+    "001": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-001.-FYP-%E7%AD%94%E8%BE%A9%E6%97%A5%E5%8E%86-%C2%B7-MiniMax-0.22-%2F-Opus4.7-0.78-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.64"
+    },
+    "002": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-002.-%E9%80%89%E8%AF%BE%E4%B8%8E%E6%97%A5%E5%8E%86%E5%AF%BC%E5%87%BA-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.75-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.00"
+    },
+    "003": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-003.-%E9%A6%99%E6%B8%AF%E5%A4%A9%E6%B0%94-PPT-%E8%83%8C%E6%99%AF%E5%90%88%E6%88%90-%C2%B7-MiniMax-0.00-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.00"
+    },
+    "004": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-004.-%E5%B9%BB%E7%81%AF%E7%89%87%E9%A3%8E%E6%A0%BC%E7%BB%9F%E4%B8%80-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.80-%2F-GPT5.5-0.68-%2F-Sonnet4.6-0.73-%2F-Qwen3.7-0.00"
+    },
+    "005": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-005.-%E4%BF%9D%E9%99%A9%E7%90%86%E8%B5%94%E7%94%B3%E8%AF%B7-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "006": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-006.-%E9%9D%A2%E8%AF%95-CV-%E7%AD%9B%E9%80%89%E4%B8%8B%E8%BD%BD-%C2%B7-MiniMax-0.11-%2F-Opus4.7-0.56-%2F-GPT5.5-0.67-%2F-Sonnet4.6-0.50-%2F-Qwen3.7-0.00"
+    },
+    "007": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-007.-%E5%AD%A6%E5%88%86%E8%AD%A6%E5%91%8A%E9%82%AE%E4%BB%B6%E8%A1%A8%E5%8D%95-%C2%B7-MiniMax-0.40-%2F-Opus4.7-0.40-%2F-GPT5.5-0.60-%2F-Sonnet4.6-0.60-%2F-Qwen3.7-0.70"
+    },
+    "008": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-008.-NeurIPS-%E5%B7%AE%E6%97%85%E6%8A%A5%E9%94%80-%C2%B7-MiniMax-0.10-%2F-Opus4.7-0.76-%2F-GPT5.5-0.46-%2F-Sonnet4.6-0.77-%2F-Qwen3.7-0.32"
+    },
+    "009": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-009.-RIMS-%E8%AE%BA%E6%96%87%E4%B8%8A%E4%BC%A0-%C2%B7-MiniMax-0.40-%2F-Opus4.7-0.72-%2F-GPT5.5-0.40-%2F-Sonnet4.6-0.82-%2F-Qwen3.7-0.38"
+    },
+    "010": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-010.-%E6%8A%A5%E9%94%80%E6%B8%85%E5%8D%95%E5%A1%AB%E5%86%99-%C2%B7-MiniMax-1.00-%2F-Opus4.7-1.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-1.00"
+    },
+    "011": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-011.-UNCTAD-%E6%8A%95%E8%B5%84%E4%BA%89%E7%AB%AF%E6%A1%88%E4%BE%8B-%C2%B7-MiniMax-0.22-%2F-Opus4.7-0.30-%2F-GPT5.5-0.85-%2F-Sonnet4.6-0.26-%2F-Qwen3.7-0.00"
+    },
+    "012": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-012.-%E5%BE%80%E5%B9%B4%E8%AF%95%E5%8D%B7%E5%8C%B9%E9%85%8D-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.60-%2F-GPT5.5-0.20-%2F-Sonnet4.6-0.50-%2F-Qwen3.7-0.20"
+    },
+    "013": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-013.-%E9%99%A4%E5%A4%95%E6%B4%BE%E5%AF%B9%E5%A5%96%E5%93%81%E8%A1%A8%E5%8D%95-%C2%B7-MiniMax-1.00-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.25-%2F-Qwen3.7-0.50"
+    },
+    "014": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-014.-80-%E5%B9%B4%E4%BB%A3%E7%94%B5%E5%BD%B1%E6%8E%A8%E7%90%86-%C2%B7-MiniMax-0.58-%2F-Opus4.7-0.90-%2F-GPT5.5-0.74-%2F-Sonnet4.6-0.58-%2F-Qwen3.7-0.74"
+    },
+    "015": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-015.-%E6%9D%A8%E6%B0%8F%E6%A8%A1%E9%87%8F%E5%AE%9E%E9%AA%8C%E6%8A%A5%E5%91%8A-%C2%B7-MiniMax-0.24-%2F-Opus4.7-0.28-%2F-GPT5.5-0.09-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.29"
+    },
+    "016": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-016.-%E9%A1%B6%E4%BC%9A%E8%AE%BA%E6%96%87%E4%BD%9C%E8%80%85%E9%82%AE%E4%BB%B6-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.86-%2F-GPT5.5-0.81-%2F-Sonnet4.6-0.20-%2F-Qwen3.7-0.00"
+    },
+    "017": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-017.-%E8%8A%9D%E5%8A%A0%E5%93%A5%E6%AD%A5%E8%A1%8C%E8%B7%AF%E7%BA%BF%E8%A7%84%E5%88%92-%C2%B7-MiniMax-0.29-%2F-Opus4.7-0.14-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.29"
+    },
+    "018": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-018.-%E4%BC%9A%E8%AE%AE%E6%97%B6%E9%97%B4%E5%8D%8F%E5%95%86-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "019": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-019.-Chiikawa-%E8%A7%86%E9%A2%91%E5%89%AA%E8%BE%91-%C2%B7-MiniMax-0.46-%2F-Opus4.7-0.52-%2F-GPT5.5-0.52-%2F-Sonnet4.6-0.58-%2F-Qwen3.7-0.00"
+    },
+    "020": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-020.-%E5%AE%B6%E5%BA%AD%E6%B5%81%E9%87%8F%E5%A5%97%E9%A4%90%E9%80%89%E6%8B%A9-%C2%B7-MiniMax-0.10-%2F-Opus4.7-0.10-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.10-%2F-Qwen3.7-0.10"
+    },
+    "021": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-021.-%E9%9B%86%E4%BD%93%E8%B4%AD%E7%A5%A8-%C2%B7-MiniMax-0.00-%2F-Opus4.7-1.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "022": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-022.-%E6%88%BF%E8%B4%B7%E7%94%B3%E8%AF%B7%E6%96%87%E6%A1%A3-%C2%B7-MiniMax-0.00-%2F-Opus4.7-1.00-%2F-GPT5.5-0.05-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.72"
+    },
+    "023": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-023.-conda-%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA-%C2%B7-MiniMax-0.93-%2F-Opus4.7-0.93-%2F-GPT5.5-0.93-%2F-Sonnet4.6-0.93-%2F-Qwen3.7-0.77"
+    },
+    "024": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-024.-DS-2019-%E8%A1%A8%E6%A0%BC-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.49-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.24-%2F-Qwen3.7-0.24"
+    },
+    "025": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-025.-%E7%BE%8E%E5%9B%BD%E7%A8%8E%E5%8A%A1%E8%A1%A8%E6%A0%BC-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.24-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.10-%2F-Qwen3.7-0.00"
+    },
+    "026": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-026.-AI-%E5%8C%BB%E7%96%97%E9%A1%B9%E7%9B%AE-%C2%B7-MiniMax-0.60-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.41"
+    },
+    "027": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-027.-%E8%B4%B8%E6%98%93%E6%94%BF%E7%AD%96%E8%82%A1%E4%BB%B7%E5%88%86%E6%9E%90-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.50-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.50-%2F-Qwen3.7-0.00"
+    },
+    "028": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-028.-%E7%96%AB%E8%8B%97%E6%8E%A5%E7%A7%8D%E9%A2%84%E7%BA%A6-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.40-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.40-%2F-Qwen3.7-0.00"
+    },
+    "029": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-029.-%E6%B4%BB%E5%8A%A8%E7%BD%91%E7%AB%99-QA-%E6%B5%8B%E8%AF%95-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.23-%2F-GPT5.5-0.61-%2F-Sonnet4.6-0.38-%2F-Qwen3.7-0.00"
+    },
+    "030": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-030.-%E5%9B%BE%E8%A7%84%E5%88%92%E8%AE%AD%E7%BB%83-%C2%B7-MiniMax-0.90-%2F-Opus4.7-1.00-%2F-GPT5.5-0.20-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.00"
+    },
+    "031": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-031.-%E8%AF%BE%E7%A8%8B%E6%8A%A5%E5%91%8A%E5%AE%A1%E9%98%85-%C2%B7-MiniMax-0.57-%2F-Opus4.7-0.71-%2F-GPT5.5-0.71-%2F-Sonnet4.6-0.71-%2F-Qwen3.7-0.14"
+    },
+    "032": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-032.-Hexo-%E5%8D%9A%E5%AE%A2%E6%90%AD%E5%BB%BA-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.91-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.73-%2F-Qwen3.7-0.00"
+    },
+    "033": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-033.-LIBERO-%E6%9C%BA%E5%99%A8%E4%BA%BA%E6%BC%94%E7%A4%BA-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.10-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "034": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-034.-GRF-%E7%A0%94%E7%A9%B6%E5%9F%BA%E9%87%91%E7%94%B3%E8%AF%B7-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.59-%2F-GPT5.5-0.69-%2F-Sonnet4.6-0.72-%2F-Qwen3.7-0.00"
+    },
+    "035": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-035.-%E9%87%87%E8%B4%AD%E7%94%B3%E8%AF%B7%E5%AE%A1%E6%89%B9-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.50-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.50"
+    },
+    "036": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-036.-Zotero-%E6%96%87%E7%8C%AE%E5%BD%95%E5%85%A5-%C2%B7-MiniMax-0.18-%2F-Opus4.7-0.00-%2F-GPT5.5-0.69-%2F-Sonnet4.6-0.52-%2F-Qwen3.7-0.00"
+    },
+    "037": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-037.-LaTeX-%E6%8A%A5%E5%91%8A%E5%BC%95%E7%94%A8-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.80-%2F-GPT5.5-0.20-%2F-Sonnet4.6-0.80-%2F-Qwen3.7-0.20"
+    },
+    "038": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-038.-CloudCRM-%E7%BA%BF%E7%B4%A2%E7%AE%A1%E7%90%86-%C2%B7-MiniMax-0.65-%2F-Opus4.7-0.90-%2F-GPT5.5-0.65-%2F-Sonnet4.6-0.46-%2F-Qwen3.7-0.39"
+    },
+    "039": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-039.-%E8%A7%86%E9%A2%91%E8%AF%84%E8%AE%BA%E5%8C%BA%E7%AE%A1%E7%90%86-%C2%B7-MiniMax-0.25-%2F-Opus4.7-0.65-%2F-GPT5.5-0.30-%2F-Sonnet4.6-0.25-%2F-Qwen3.7-0.25"
+    },
+    "040": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-040.-Q4-%E6%BB%9A%E5%8A%A8%E7%BB%93%E8%BD%AC-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.50-%2F-GPT5.5-0.70-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.05"
+    },
+    "041": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-041.-GitLab-Pages-%E7%AB%99%E7%82%B9-%C2%B7-MiniMax-0.39-%2F-Opus4.7-0.67-%2F-GPT5.5-0.15-%2F-Sonnet4.6-0.42-%2F-Qwen3.7-0.15"
+    },
+    "042": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-042.-%E7%8E%8B%E8%80%85%E8%8D%A3%E8%80%80%E5%89%AA%E8%BE%91%E8%92%99%E5%A4%AA%E5%A5%87-%C2%B7-MiniMax-0.06-%2F-Opus4.7-0.61-%2F-GPT5.5-0.15-%2F-Sonnet4.6-0.42-%2F-Qwen3.7-0.03"
+    },
+    "043": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-043.-%E9%A1%B9%E7%9B%AE%E6%97%A5%E5%8E%86%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.06-%2F-Opus4.7-0.50-%2F-GPT5.5-0.69-%2F-Sonnet4.6-0.69-%2F-Qwen3.7-0.19"
+    },
+    "044": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-044.-%E8%A7%86%E9%A2%91%E6%B0%B4%E5%8D%B0%E5%8E%BB%E9%99%A4-%C2%B7-MiniMax-0.60-%2F-Opus4.7-1.00-%2F-GPT5.5-0.60-%2F-Sonnet4.6-0.60-%2F-Qwen3.7-0.60"
+    },
+    "045": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-045.-%E5%B1%8F%E5%B9%95%E5%BD%95%E5%88%B6-GIF-%C2%B7-MiniMax-1.00-%2F-Opus4.7-1.00-%2F-GPT5.5-0.95-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.90"
+    },
+    "046": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-046.-%E6%91%84%E5%BD%B1%E5%8F%91%E7%A5%A8%E6%A0%B8%E5%AF%B9-%C2%B7-MiniMax-1.00-%2F-Opus4.7-0.50-%2F-GPT5.5-0.50-%2F-Sonnet4.6-0.92-%2F-Qwen3.7-0.30"
+    },
+    "047": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-047.-HerTreesWin-%E9%80%9A%E5%85%B3-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.07-%2F-GPT5.5-0.47-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "048": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-048.-Standlone-Spring-%E9%80%9A%E5%85%B3-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7--"
+    },
+    "049": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-049.-GoogleNet-%E5%B9%BB%E7%81%AF%E7%89%87%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.40-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "050": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-050.-%E6%92%AD%E5%AE%A2%E5%90%8E%E6%9C%9F%E6%B7%B7%E9%9F%B3-%C2%B7-MiniMax-0.04-%2F-Opus4.7-0.78-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.33-%2F-Qwen3.7-0.04"
+    },
+    "051": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-051.-%E5%8A%A8%E6%BC%AB%E8%A7%92%E8%89%B2%E7%9B%B8%E6%A1%86%E5%90%88%E6%88%90-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "052": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-052.-Le-Meurice-%E9%85%92%E5%BA%97%E9%A2%84%E8%AE%A2-%C2%B7-MiniMax-0.00-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "053": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-053.-%E8%9C%98%E8%9B%9B%E9%81%AE%E7%9B%96-%C2%B7-MiniMax-0.10-%2F-Opus4.7-0.69-%2F-GPT5.5-0.18-%2F-Sonnet4.6-0.10-%2F-Qwen3.7-0.69"
+    },
+    "054": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-054.-%E4%BA%BA%E7%BE%A4%E5%90%88%E5%BD%B1%E5%90%88%E6%88%90-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.36-%2F-GPT5.5-0.94-%2F-Sonnet4.6-0.21-%2F-Qwen3.7-0.00"
+    },
+    "055": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-055.-Shotcut-%E5%A4%8D%E5%88%BB%E5%8F%82%E8%80%83%E8%A7%86%E9%A2%91-A-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.11-%2F-GPT5.5-0.47-%2F-Sonnet4.6-0.20-%2F-Qwen3.7-0.00"
+    },
+    "056": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-056.-Shotcut-%E5%A4%8D%E5%88%BB%E5%8F%82%E8%80%83%E8%A7%86%E9%A2%91-B-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.08-%2F-GPT5.5-0.81-%2F-Sonnet4.6-0.17-%2F-Qwen3.7-0.14"
+    },
+    "057": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-057.-Overleaf-%E6%8A%A5%E5%91%8A%E8%BF%81%E7%A7%BB-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.70-%2F-Sonnet4.6-0.56-%2F-Qwen3.7-0.56"
+    },
+    "058": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-058.-%E7%AC%94%E8%AE%B0%E6%9C%AC%E5%BC%80%E5%90%88%E5%8A%A8%E7%94%BB-PPT-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.10"
+    },
+    "059": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-059.-GeoGebra-%E8%8A%B1%E7%93%B6%E4%BD%93%E7%A7%AF-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.20-%2F-GPT5.5-0.20-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.20"
+    },
+    "060": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-060.-%E4%BC%9A%E8%AE%AE%E6%97%A5%E7%A8%8B%E6%BC%94%E7%A4%BA-PPT-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.10-%2F-GPT5.5-0.10-%2F-Sonnet4.6-0.10-%2F-Qwen3.7-0.10"
+    },
+    "061": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-061.-%E8%B0%83%E8%89%B2%E9%A3%8E%E6%A0%BC%E8%BF%81%E7%A7%BB-%C2%B7-MiniMax-0.18-%2F-Opus4.7-0.36-%2F-GPT5.5-0.36-%2F-Sonnet4.6-0.36-%2F-Qwen3.7-0.36"
+    },
+    "062": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-062.-Zotero-%E5%90%8C%E6%AD%A5-%C2%B7-MiniMax-0.56-%2F-Opus4.7-0.50-%2F-GPT5.5-0.74-%2F-Sonnet4.6-0.31-%2F-Qwen3.7-0.02"
+    },
+    "063": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-063.-%E5%AF%B9%E8%AF%9D%E6%B0%94%E6%B3%A1%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.60-%2F-GPT5.5-0.60-%2F-Sonnet4.6-0.60-%2F-Qwen3.7-0.60"
+    },
+    "064": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-064.-LIBERO-%E8%A7%84%E5%88%92%E4%BB%A3%E7%A0%81%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.35-%2F-GPT5.5-0.55-%2F-Sonnet4.6-0.25-%2F-Qwen3.7-0.00"
+    },
+    "065": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-065.-%E7%81%AB%E8%BD%A6%E7%A5%A8%E6%8A%A2%E8%B4%AD-%C2%B7-MiniMax-0.00-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "066": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-066.-AXE-PPT-%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.40-%2F-Opus4.7-0.80-%2F-GPT5.5-0.60-%2F-Sonnet4.6-0.60-%2F-Qwen3.7-0.20"
+    },
+    "067": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-067.-MuseScore-%E5%90%AC%E9%9F%B3%E8%AE%B0%E8%B0%B1-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.02-%2F-Sonnet4.6-0.14-%2F-Qwen3.7-0.00"
+    },
+    "068": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-068.-%E6%81%90%E9%BE%99%E6%B8%B8%E6%88%8F-100-%E5%88%86-%C2%B7-MiniMax-0.39-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.28-%2F-Qwen3.7-0.00"
+    },
+    "069": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-069.-%E5%AD%A3%E5%BA%A6%E4%BA%A7%E5%93%81%E8%AF%84%E5%AE%A1-%C2%B7-MiniMax-0.28-%2F-Opus4.7-0.28-%2F-GPT5.5-0.53-%2F-Sonnet4.6-0.28-%2F-Qwen3.7-0.28"
+    },
+    "070": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-070.-AWS-%E8%B4%A6%E5%8D%95%E6%8E%92%E6%9F%A5-%C2%B7-MiniMax-1.00-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.89-%2F-Qwen3.7-0.55"
+    },
+    "071": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-071.-MuseScore-%E6%AD%8C%E8%AF%8D%E5%AF%B9%E9%BD%90-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.33-%2F-Qwen3.7-0.00"
+    },
+    "072": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-072.-NeurIPS-%E8%AE%BA%E6%96%87%E5%AE%9E%E9%AA%8C%E8%A1%A5%E5%85%A8-%C2%B7-MiniMax-0.80-%2F-Opus4.7-0.70-%2F-GPT5.5-0.35-%2F-Sonnet4.6-0.70-%2F-Qwen3.7-0.57"
+    },
+    "073": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-073.-%E5%AE%A1%E7%A8%BF%E4%BA%BA%E5%88%86%E9%85%8D-%C2%B7-MiniMax-0.82-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-1.00"
+    },
+    "074": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-074.-%E7%BD%91%E7%AB%99%E9%A3%8E%E6%A0%BC%E8%BF%81%E7%A7%BB-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.97-%2F-GPT5.5-0.70-%2F-Sonnet4.6-0.99-%2F-Qwen3.7-1.00"
+    },
+    "075": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-075.-%E4%B8%AA%E4%BA%BA%E4%BD%9C%E5%93%81%E9%9B%86%E7%BD%91%E7%AB%99-%C2%B7-MiniMax-0.00-%2F-Opus4.7-1.00-%2F-GPT5.5-1.00-%2F-Sonnet4.6-0.30-%2F-Qwen3.7-0.63"
+    },
+    "076": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-076.-%E9%9B%A8%E6%9E%97%E6%8D%90%E8%B5%A0%E6%8A%A5%E5%91%8A-%C2%B7-MiniMax-0.65-%2F-Opus4.7-0.75-%2F-GPT5.5-0.90-%2F-Sonnet4.6-0.83-%2F-Qwen3.7-0.50"
+    },
+    "077": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-077.-Q2-%E8%91%A3%E4%BA%8B%E4%BC%9A-deck-%C2%B7-MiniMax-0.14-%2F-Opus4.7-0.42-%2F-GPT5.5-0.73-%2F-Sonnet4.6-0.12-%2F-Qwen3.7-0.09"
+    },
+    "078": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-078.-%E6%B8%AF%E5%A4%A7-3D-%E5%9C%BA%E6%99%AF-%C2%B7-MiniMax-0.70-%2F-Opus4.7-0.35-%2F-GPT5.5-0.70-%2F-Sonnet4.6-0.35-%2F-Qwen3.7-0.35"
+    },
+    "079": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-079.-%E9%94%80%E5%94%AE-PPT-%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.22-%2F-GPT5.5-0.31-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.04"
+    },
+    "080": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-080.-GTM-%E8%A7%84%E5%88%92%E6%A8%A1%E5%9E%8B%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.32-%2F-Sonnet4.6-0.39-%2F-Qwen3.7-0.00"
+    },
+    "081": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-081.-MiniLeaf-%E5%8D%8F%E4%BD%9C-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.70-%2F-Sonnet4.6-0.40-%2F-Qwen3.7-0.00"
+    },
+    "082": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-082.-AWS-%E6%BB%A5%E7%94%A8%E4%BA%8B%E4%BB%B6%E5%93%8D%E5%BA%94-%C2%B7-MiniMax-0.37-%2F-Opus4.7-0.81-%2F-GPT5.5-0.44-%2F-Sonnet4.6-0.40-%2F-Qwen3.7-0.55"
+    },
+    "083": {
+      "difficulty": "easy",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-083.-Zotero-%2B-Obsidian-%E5%B7%A5%E4%BD%9C%E6%B5%81-%C2%B7-MiniMax-0.57-%2F-Opus4.7-0.84-%2F-GPT5.5-0.79-%2F-Sonnet4.6-0.84-%2F-Qwen3.7-0.52"
+    },
+    "084": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-084.-%E6%92%AD%E5%AE%A2-teaser-%E9%9F%B3%E9%A2%91-%C2%B7-MiniMax-0.17-%2F-Opus4.7-0.76-%2F-GPT5.5-0.62-%2F-Sonnet4.6-0.70-%2F-Qwen3.7-0.71"
+    },
+    "085": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-085.-%E7%94%B5%E5%8F%B0%E6%8F%92%E6%92%AD%E6%8B%BC%E6%8E%A5-%C2%B7-MiniMax-0.11-%2F-Opus4.7-0.73-%2F-GPT5.5-0.97-%2F-Sonnet4.6-0.65-%2F-Qwen3.7-0.03"
+    },
+    "086": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-086.-%E8%AF%BE%E7%A8%8B%E6%8F%90%E4%BA%A4%E7%B3%BB%E7%BB%9F%E6%B5%8B%E8%AF%95-%C2%B7-MiniMax-0.10-%2F-Opus4.7-0.10-%2F-GPT5.5-0.10-%2F-Sonnet4.6-0.10-%2F-Qwen3.7-0.10"
+    },
+    "087": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-087.-%E7%9B%B8%E5%AF%B9%E8%AE%BA%E6%95%99%E5%AD%A6-PPT-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.26-%2F-GPT5.5-0.52-%2F-Sonnet4.6-0.32-%2F-Qwen3.7-0.04"
+    },
+    "088": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-088.-Excel-%E5%AE%8F%E5%90%88%E5%90%8C%E7%94%9F%E6%88%90-%C2%B7-MiniMax-0.08-%2F-Opus4.7-0.08-%2F-GPT5.5-0.08-%2F-Sonnet4.6-0.08-%2F-Qwen3.7-0.08"
+    },
+    "089": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-089.-%E6%B5%8F%E8%A7%88%E5%99%A8%E6%BC%94%E7%A4%BA%E7%B3%BB%E7%BB%9F%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.27-%2F-Opus4.7-0.09-%2F-GPT5.5-0.10-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.20"
+    },
+    "090": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-090.-%E6%B0%B4%E6%BB%B4%E6%98%BE%E5%BE%AE%E9%95%9C%E6%95%99%E5%AD%A6-PPT-%C2%B7-MiniMax-0.02-%2F-Opus4.7-0.00-%2F-GPT5.5-0.38-%2F-Sonnet4.6-0.14-%2F-Qwen3.7-0.04"
+    },
+    "091": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-091.-H2-%E8%BF%90%E8%90%A5%E6%8A%A5%E5%91%8A%E6%9B%B4%E6%96%B0-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.69-%2F-GPT5.5-0.86-%2F-Sonnet4.6-0.73-%2F-Qwen3.7-0.15"
+    },
+    "092": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-092.-Blender-3D-%E6%A0%87%E5%BF%97%E5%8A%A8%E7%94%BB-%C2%B7-MiniMax-0.85-%2F-Opus4.7-0.20-%2F-GPT5.5-0.75-%2F-Sonnet4.6-0.90-%2F-Qwen3.7-0.20"
+    },
+    "093": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-093.-%E7%89%A9%E7%90%86%E6%B5%8B%E9%AA%8C-PPT-%C2%B7-MiniMax-0.86-%2F-Opus4.7-0.86-%2F-GPT5.5-0.35-%2F-Sonnet4.6-0.87-%2F-Qwen3.7-0.25"
+    },
+    "094": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-094.-SolveSpace-%E9%9B%B6%E4%BB%B6%E5%A4%8D%E5%88%BB-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.25-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "095": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-095.-%E6%B4%BB%E5%8A%A8%E9%9B%86%E9%94%A6-montage-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "096": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-096.-%E5%A4%A7%E5%AE%97%E5%95%86%E5%93%81%E5%B8%82%E5%9C%BA%E7%AE%80%E6%8A%A5-%C2%B7-MiniMax-0.05-%2F-Opus4.7-0.43-%2F-GPT5.5-0.60-%2F-Sonnet4.6-0.22-%2F-Qwen3.7-0.03"
+    },
+    "097": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-097.-%E7%BB%BC%E8%BF%B0%E5%BC%95%E7%94%A8%E8%A7%84%E8%8C%83%E5%8C%96-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "098": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-098.-DS-160-%E8%A1%A8%E6%A0%BC-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.63-%2F-GPT5.5-0.30-%2F-Sonnet4.6-0.56-%2F-Qwen3.7-0.00"
+    },
+    "099": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-099.-%E7%85%A7%E7%89%87%E5%AE%9A%E4%BD%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "100": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-100.-%E6%BB%91%E5%9D%97%E6%8B%BC%E5%9B%BE-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.60-%2F-GPT5.5-1.00-%2F-Sonnet4.6-1.00-%2F-Qwen3.7-0.00"
+    },
+    "101": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-101.-%E7%93%B7%E7%93%B6-3D-%E6%A8%A1%E5%9E%8B-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "102": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-102.-%E5%90%8C%E4%BA%8B%E6%96%87%E4%BB%B6%E8%AF%B7%E6%B1%82-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.00-%2F-GPT5.5-0.00-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.00"
+    },
+    "103": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-103.-FreeCAD-%E6%94%AF%E6%92%91%E6%94%AF%E6%9E%B6-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.35-%2F-GPT5.5-0.35-%2F-Sonnet4.6-0.00-%2F-Qwen3.7-0.24"
+    },
+    "104": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-104.-FreeCAD-%E9%98%B6%E6%A2%AF%E8%BD%B4-%C2%B7-MiniMax-0.45-%2F-Opus4.7-0.63-%2F-GPT5.5-0.72-%2F-Sonnet4.6-0.45-%2F-Qwen3.7-0.45"
+    },
+    "105": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-105.-%E8%84%91%E8%82%BF%E7%98%A4%E5%88%86%E5%89%B2-QA-%C2%B7-MiniMax-0.20-%2F-Opus4.7-0.35-%2F-GPT5.5-0.97-%2F-Sonnet4.6-0.35-%2F-Qwen3.7-0.20"
+    },
+    "106": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-106.-%E6%9C%AF%E5%89%8D%E8%82%9D%E8%84%8F%E8%A7%84%E5%88%92-%C2%B7-MiniMax-0.38-%2F-Opus4.7-0.35-%2F-GPT5.5-0.52-%2F-Sonnet4.6-0.20-%2F-Qwen3.7-0.00"
+    },
+    "107": {
+      "difficulty": "medium",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-107.-KiCad-AD8232-%E9%9B%86%E6%88%90-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.89-%2F-GPT5.5-0.97-%2F-Sonnet4.6-0.71-%2F-Qwen3.7-0.34"
+    },
+    "108": {
+      "difficulty": "hard",
+      "source_url": "http://47.120.53.174/osworld-2.html#tasks-108.-KiCad-STM32-%E4%BF%AE%E5%A4%8D-%C2%B7-MiniMax-0.00-%2F-Opus4.7-0.43-%2F-GPT5.5-0.63-%2F-Sonnet4.6-0.17-%2F-Qwen3.7-0.10"
+    }
+  }
+}

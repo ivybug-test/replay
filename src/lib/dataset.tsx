@@ -34,10 +34,25 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
   })
 
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}dataset.json`)
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then((d: Dataset) => setBase(d))
-      .catch((e) => setError(String(e)))
+    const controller = new AbortController()
+    const read = async (filename: string) => {
+      const response = await fetch(`${import.meta.env.BASE_URL}${filename}`, { signal: controller.signal })
+      if (!response.ok) throw new Error(`${filename}: HTTP ${response.status}`)
+      return response.json()
+    }
+    Promise.all([read('dataset.json'), read('osworld-v2.dataset.json')])
+      .then(([d, osworld]: [Dataset, UploadBundle]) => {
+        if (controller.signal.aborted) return
+        setBase({
+          ...d,
+          vendors: mergeById(d.vendors, osworld.vendors),
+          agents: mergeById(d.agents, osworld.agents),
+          tasks: mergeById(d.tasks, osworld.tasks),
+          runs: mergeById(d.runs, osworld.runs),
+        })
+      })
+      .catch((e) => { if (!controller.signal.aborted) setError(String(e)) })
+    return () => controller.abort()
   }, [])
 
   const data: Dataset | null = base
@@ -133,7 +148,7 @@ export function useRunSteps(run: Run | undefined | null): {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run?.id])
+  }, [run?.id, run?.steps]) // live runs replace inline steps without changing their ID
 
   return { steps: payload.steps, verifierLog: payload.verifierLog, loading, error }
 }

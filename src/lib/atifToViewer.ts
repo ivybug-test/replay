@@ -1,6 +1,6 @@
 import type { AtifContent, AtifImageSource, AtifStep, AtifToolCall, AtifTrajectory } from './atif'
 import { parseAtifTrajectory } from './atif'
-import type { Edit, Mutation, Step, StepImage } from './types'
+import type { Edit, Mutation, Step, StepAgent, StepImage } from './types'
 
 export interface AtifViewerOptions {
   /** Resolve relative media paths (for example, files inside an uploaded ZIP). */
@@ -32,6 +32,25 @@ function defaultImageUrl(source: AtifImageSource): string | undefined {
 
 function record(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return record(value) ? value : {}
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function provenance(step: AtifStep): Record<string, unknown> {
+  return object(object(step.extra?.osworld_harness).provenance)
+}
+
+interface DocumentContext {
+  document: AtifTrajectory
+  key: string
+  agent: StepAgent
+  parent?: DocumentContext
 }
 
 function replayTiming(step: AtifStep): { startMs?: number; endMs?: number } {
@@ -111,13 +130,28 @@ function imageEntries(
  */
 export function atifTrajectoryToSteps(input: unknown, options: AtifViewerOptions = {}): Step[] {
   const trajectory: AtifTrajectory = parseAtifTrajectory(input, options.requireV18 ?? false)
-  const trajectories: AtifTrajectory[] = []
-  const visit = (document: AtifTrajectory) => {
-    trajectories.push(document)
-    for (const child of document.subagent_trajectories ?? []) visit(child)
+  const trajectories: DocumentContext[] = []
+  const visit = (document: AtifTrajectory, key: string, parent?: DocumentContext) => {
+    const harness = object(document.agent.extra?.osworld_harness)
+    const first = document.steps.map(provenance).find((value) => text(value.agent_id)) ?? {}
+    const role = text(harness.role) ?? text(first.role)
+    const origin = text(harness.origin) ?? text(first.origin)
+    const context: DocumentContext = {
+      document, key, parent,
+      agent: {
+        id: text(harness.agent_id) ?? text(first.agent_id) ?? text(document.trajectory_id) ?? key,
+        trajectoryId: text(document.trajectory_id), role, origin,
+        label: role ?? origin ?? document.agent.name,
+      },
+    }
+    trajectories.push(context)
+    for (const [index, child] of (document.subagent_trajectories ?? []).entries()) {
+      visit(child, `${key}/${index}`, context)
+    }
   }
-  visit(trajectory)
-  const entries = trajectories.flatMap((document, documentIndex) => document.steps.map((step) => ({
+  visit(trajectory, 'root')
+  const entries = trajectories.flatMap((context, documentIndex) => context.document.steps.map((step) => ({
+    context,
     step,
     order: documentIndex * 1_000_000 + step.step_id,
   }))).sort((left, right) => {
@@ -133,7 +167,48 @@ export function atifTrajectoryToSteps(input: unknown, options: AtifViewerOptions
     .map(({ step }) => step.timestamp ? Date.parse(step.timestamp) : NaN)
     .find(Number.isFinite)
 
-  return entries.map(({ step: atifStep }, index) => {
+  // Preserve the explicit ATIF tool-result -> child trajectory edge. The flat
+  // chronological step array remains unchanged for playback and deep links.
+  const delegations = new Map<string, { context: DocumentContext; index: number; tool?: string }>()
+  entries.forEach(({ context, step }, index) => {
+    for (const result of step.observation?.results ?? []) {
+      for (const ref of result.subagent_trajectory_ref ?? []) {
+        if (ref.trajectory_id) delegations.set(ref.trajectory_id, {
+          context, index,
+          tool: step.tool_calls?.find((call) => call.tool_call_id === result.source_call_id)?.function_name,
+        })
+      }
+    }
+  })
+  for (const context of trajectories) {
+    const delegation = context.document.trajectory_id ? delegations.get(context.document.trajectory_id) : undefined
+    const parent = delegation?.context ?? context.parent
+    if (parent && parent !== context) {
+      context.agent.parentId = parent.agent.id
+      context.agent.parentLabel = parent.agent.label
+      context.agent.delegationStepIndex = delegation?.index
+      context.agent.delegationTool = delegation?.tool
+    }
+  }
+
+  return entries.map(({ step: atifStep, context }, index) => {
+    const source = provenance(atifStep)
+    const role = text(source.role) ?? context.agent.role
+    const origin = text(source.origin) ?? context.agent.origin
+    const identity = text(source.agent_id) ?? context.agent.id
+    const agent: StepAgent = {
+      ...context.agent, id: identity, role, origin,
+      label: role ?? origin ?? context.agent.label,
+    }
+    // Legacy Agent Work may contain several agents in one flat document; do
+    // not invent a delegation edge just because the messages are adjacent.
+    if (identity !== context.agent.id) {
+      delete agent.parentId
+      delete agent.parentLabel
+      delete agent.delegationStepIndex
+      delete agent.delegationTool
+    }
+    const turn = source.global_turn_num ?? source.turn_num
     const timing = replayTiming(atifStep)
     const timestampMs = atifStep.timestamp ? Date.parse(atifStep.timestamp) : NaN
     const startMs = timing.startMs ?? (
@@ -177,6 +252,9 @@ export function atifTrajectoryToSteps(input: unknown, options: AtifViewerOptions
     return {
       index,
       role: atifStep.source,
+      agent,
+      sourceStepId: atifStep.step_id,
+      turn: typeof turn === 'number' ? turn : undefined,
       text: message.text,
       reasoning: atifStep.reasoning_content ?? null,
       toolCalls: calls.length ? calls.map((call) => ({

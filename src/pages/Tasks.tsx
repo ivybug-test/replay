@@ -10,6 +10,7 @@ import { FORMAT_LABELS, fmtPct } from '../lib/format'
 import { useDatasetStore, visibleTasks } from '../lib/dataset'
 import { useAuth } from '../lib/auth'
 import type { Run, Task } from '../lib/types'
+import { osworldCapabilities, osworldCapabilityLabel } from '../lib/osworld'
 
 const DIFFICULTY: Record<string, string> = {
   easy: 'bg-emerald-500/15 text-emerald-300',
@@ -68,6 +69,8 @@ export default function Tasks() {
   const { isMember } = useAuth()
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [aftIds, setAftIds] = useState<Set<string>>(new Set())
+  const [osworldFilters, setOsworldFilters] = useState<Set<string>>(new Set())
+  const [osworldDifficulty, setOsworldDifficulty] = useState('')
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}aft/index.json`)
@@ -86,6 +89,18 @@ export default function Tasks() {
   if (!data) return <Loading />
 
   const tasks = visibleTasks(data, isMember)
+  const osworldTasks = tasks.filter((task) => task.source === 'osworld')
+  const capabilityCounts = new Map<string, number>()
+  for (const task of osworldTasks) {
+    for (const capability of osworldCapabilities(task)) {
+      capabilityCounts.set(capability, (capabilityCounts.get(capability) ?? 0) + 1)
+    }
+  }
+  const matchesFilters = (task: Task) => task.source !== 'osworld' || (
+    (!osworldDifficulty || task.difficulty === osworldDifficulty)
+    && (osworldFilters.size === 0
+      || osworldCapabilities(task).some((capability) => osworldFilters.has(capability)))
+  )
   // group: vendor -> category -> tasks
   const byVendor = new Map<string, Map<string, Task[]>>()
   for (const t of tasks) {
@@ -93,14 +108,14 @@ export default function Tasks() {
     if (!byVendor.has(t.vendorId)) byVendor.set(t.vendorId, new Map())
     const cats = byVendor.get(t.vendorId)!
     if (!cats.has(cat)) cats.set(cat, [])
-    cats.get(cat)!.push(t)
+    if (matchesFilters(t)) cats.get(cat)!.push(t)
   }
 
   return (
     <>
       <PageHeader
         title="Tasks"
-        subtitle={`${tasks.length} tasks · grouped by source · environment/category`}
+        subtitle={`${tasks.length} tasks · grouped by source · OSWorld capability and difficulty filters`}
       />
       <div className="space-y-6 p-8">
         <details className="text-xs text-zinc-500">
@@ -118,6 +133,7 @@ export default function Tasks() {
           const cats = byVendor.get(vendor.id)
           if (!cats) return null
           const vendorTaskCount = [...cats.values()].reduce((n, ts) => n + ts.length, 0)
+          const vendorTotal = tasks.filter((task) => task.vendorId === vendor.id).length
           const isCollapsed = collapsed[vendor.id]
           return (
             <section key={vendor.id} className="card overflow-hidden">
@@ -128,7 +144,8 @@ export default function Tasks() {
                 <span className="text-zinc-500">{isCollapsed ? '▸' : '▾'}</span>
                 <span className="font-semibold text-white">{vendor.name}</span>
                 <span className="text-xs text-zinc-500">
-                  {cats.size} {cats.size === 1 ? 'group' : 'groups'} · {vendorTaskCount} tasks
+                  {cats.size} {cats.size === 1 ? 'group' : 'groups'} · {vendorTaskCount}
+                  {vendorTaskCount === vendorTotal ? '' : ` of ${vendorTotal}`} tasks
                 </span>
               </button>
 
@@ -138,6 +155,50 @@ export default function Tasks() {
                     <div className="bg-ink-900/40 px-5 py-2.5 text-xs leading-relaxed text-zinc-400">
                       <span className="mr-1.5 font-medium uppercase tracking-wide text-zinc-500">Coverage</span>
                       {vendor.coverage}
+                    </div>
+                  )}
+                  {vendor.id === 'osworld-v2' && (
+                    <div className="space-y-2 bg-ink-900/40 px-5 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Capability filters</span>
+                        {(osworldFilters.size > 0 || osworldDifficulty) && (
+                          <button className="text-xs text-accent hover:underline" onClick={() => {
+                            setOsworldFilters(new Set())
+                            setOsworldDifficulty('')
+                          }}>Clear filters</button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {[...capabilityCounts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([capability, count]) => {
+                          const active = osworldFilters.has(capability)
+                          return (
+                            <button key={capability} type="button" aria-pressed={active}
+                              onClick={() => setOsworldFilters((current) => {
+                                const next = new Set(current)
+                                next.has(capability) ? next.delete(capability) : next.add(capability)
+                                return next
+                              })}
+                              className={active
+                                ? 'rounded-full bg-accent px-3 py-1 text-xs font-medium text-ink-950'
+                                : 'rounded-full border border-ink-600 px-3 py-1 text-xs text-zinc-300 hover:border-accent/60'}>
+                              {osworldCapabilityLabel(capability)} · {count}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <label className="flex items-center gap-3 text-xs text-zinc-400">
+                        Difficulty
+                        <select aria-label="Difficulty" value={osworldDifficulty} onChange={(event) => setOsworldDifficulty(event.target.value)}
+                          className="rounded border border-ink-600 bg-ink-900 px-2 py-1 text-zinc-200">
+                          <option value="">All difficulties</option>
+                          {['easy', 'medium', 'hard'].map((difficulty) => (
+                            <option key={difficulty} value={difficulty}>
+                              {difficulty[0].toUpperCase() + difficulty.slice(1)} · {osworldTasks.filter((task) => task.difficulty === difficulty).length}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="text-[11px] text-zinc-600">Selecting multiple capabilities shows tasks matching any selected label.</p>
                     </div>
                   )}
                   {[...cats.entries()].map(([cat, ts]) => (
@@ -167,6 +228,15 @@ export default function Tasks() {
                                 )}
                               </div>
                               <h4 className="mt-2 line-clamp-2 text-sm font-medium text-white">{task.title}</h4>
+                              {task.source === 'osworld' && (
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  <Pill className="bg-amber-500/15 text-amber-200">{String(task.metadata?.snapshot || 'Other')}</Pill>
+                                  {osworldCapabilities(task).slice(0, 3).map((capability) => (
+                                    <Pill key={capability}>{osworldCapabilityLabel(capability)}</Pill>
+                                  ))}
+                                  {osworldCapabilities(task).length > 3 && <Pill>+{osworldCapabilities(task).length - 3}</Pill>}
+                                </div>
+                              )}
                               {badges.length > 0 && (
                                 <div className="mt-2 flex flex-wrap gap-1">
                                   {badges.map((bd) => (
@@ -188,6 +258,7 @@ export default function Tasks() {
                           )
                         })}
                       </div>
+                      {ts.length === 0 && <p className="py-6 text-sm text-zinc-500">No tasks match these filters.</p>}
                     </div>
                   ))}
                 </div>

@@ -9,6 +9,7 @@ import EnvFileBrowser from '../components/EnvFileBrowser'
 import { FORMAT_LABELS, fmtDuration, fmtPct, fmtReward, prettyModel } from '../lib/format'
 import { aggregate, useDatasetStore, useLookups } from '../lib/dataset'
 import type { Stat } from '../lib/types'
+import { osworldCapabilities, osworldCapabilityLabel } from '../lib/osworld'
 
 export default function TaskDetail() {
   const { taskId } = useParams()
@@ -79,6 +80,35 @@ export default function TaskDetail() {
 
         {/* Environment (Dockerfile / compose interpretation) */}
         <EnvironmentPanel task={task} />
+
+        {task.source === 'osworld' && (
+          <section className="card space-y-3 p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Task environment</h2>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-zinc-400">Snapshot</span>
+              <Pill>{String(meta.snapshot || task.category)}</Pill>
+              {(meta.related_apps as string[] | undefined)?.map((app) => <Pill key={app}>{app}</Pill>)}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-zinc-400">Capabilities</span>
+              {osworldCapabilities(task).map((capability) => (
+                <Pill key={capability}>{osworldCapabilityLabel(capability)}</Pill>
+              ))}
+            </div>
+            {typeof meta.difficulty_source === 'string' && (
+              <p className="text-xs text-zinc-500">
+                Difficulty uses the baseline labels in the{' '}
+                <a className="text-accent hover:underline" href={meta.difficulty_source} target="_blank" rel="noreferrer">knowledge base</a>.
+              </p>
+            )}
+            {Object.keys((meta.template_variables as Record<string, string> | undefined) ?? {}).length > 0 && (
+              <p className="text-sm text-amber-200/80">
+                This task contains runtime values. {'{{variable}}'} placeholders in the task files represent
+                values supplied by the deployment or run environment, such as website domains and session credentials.
+              </p>
+            )}
+          </section>
+        )}
 
         {/* OAI-messages style metadata */}
         {(meta.expected_tools as string[] | undefined)?.length || meta.expected_answer ? (

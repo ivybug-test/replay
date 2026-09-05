@@ -1,4 +1,16 @@
 import type { AtifImageMediaType, AtifTrajectory } from './atif'
+import {
+  validatePlannerState,
+  type PlannerStateEventV1,
+  type PlannerStateV1,
+} from './plannerState'
+export {
+  OSWORLD_PLANNER_STATE_SCHEMA,
+  type CompletedPlannerNodeV1,
+  type PlannerNodeV1,
+  type PlannerStateEventV1,
+  type PlannerStateV1,
+} from './plannerState'
 
 /** Stable namespaces owned by the OSWorld Harness, not by core ATIF. */
 export const OSWORLD_HARNESS_SCHEMA = 'osworld-harness/v1' as const
@@ -80,6 +92,11 @@ export interface OsworldHarnessRootExtraV1 {
     [key: string]: unknown
   }
   desktop_timeline?: OsworldDesktopTimelineV1
+  events?: Array<PlannerStateEventV1 | Record<string, unknown>>
+  state?: {
+    planner?: PlannerStateV1
+    [key: string]: unknown
+  }
   [key: string]: unknown
 }
 
@@ -412,6 +429,23 @@ export function parseOsworldAtifExtensions(trajectory: AtifTrajectory): OsworldA
         issues.push(`extra.osworld_harness.schema_version must be ${OSWORLD_HARNESS_SCHEMA}`)
       }
       if (root.osworld_harness.desktop_timeline != null) validateTimeline(root.osworld_harness.desktop_timeline, issues)
+      if (root.osworld_harness.events != null) {
+        if (!Array.isArray(root.osworld_harness.events)) issues.push('extra.osworld_harness.events must be an array')
+        else root.osworld_harness.events.forEach((event, index) => {
+          if (object(event) && event.event_type === 'planner_state') {
+            if (!nonNegativeInteger(event.sequence) || Number(event.sequence) < 1) {
+              issues.push(`extra.osworld_harness.events[${index}].sequence must be a positive integer`)
+            }
+            if (!nonNegativeInteger(event.episode_elapsed_ms)) {
+              issues.push(`extra.osworld_harness.events[${index}].episode_elapsed_ms must be a non-negative integer`)
+            }
+            validatePlannerState(event.record, `extra.osworld_harness.events[${index}].record`, issues)
+          }
+        })
+      }
+      if (object(root.osworld_harness.state) && root.osworld_harness.state.planner != null) {
+        validatePlannerState(root.osworld_harness.state.planner, 'extra.osworld_harness.state.planner', issues)
+      }
       harness = root.osworld_harness as unknown as OsworldHarnessRootExtraV1
     }
   }

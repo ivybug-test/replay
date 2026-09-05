@@ -5,6 +5,10 @@ It keeps the upstream task browser, film-style trajectory view, upload flow,
 specialized renderers and AFT panels, and adds a live integration with the
 existing OSS Replay backend in `/home/binqiu/oss-replay`.
 
+A standalone read-only OSS API is implemented in [backend/README.md](./backend/README.md),
+with catalog/history queries and native/legacy ATIF replay. The existing frontend
+proxy has not yet been switched to this backend.
+
 The first migration slice is available at `/live`: it lists real OSS runs,
 opens their tasks, loads the complete semantic Agent Work sequence, and shows
 causal desktop screenshots through the existing authenticated image API.
@@ -32,11 +36,68 @@ npm run deploy        # build, restart, and verify http://127.0.0.1:18768/live
 
 ### Execution State
 
-The State panel shows only Observer descriptions, interval numbers and model-turn
-counts. It reads `observer_interval` events from live/archived Harness ATIF and
-uses `state.observer` when only the latest snapshot is present. Time links jump
-to the observed interval when its source timestamp is available. Old Goal,
-Action, Checkpoint and other execution metrics are no longer displayed.
+The State panel shows the Planner plan at the current playback position, node
+outcomes and global turn budget, followed by Observer descriptions. It reads
+`planner_state` and `observer_interval` events from live/archived Harness ATIF,
+using `state.planner` or `state.observer` only when the corresponding history is
+missing. Time links jump to the source timestamp. Old Goal, Action, Checkpoint
+and other execution metrics are no longer displayed.
+
+### Steps navigation
+
+The Steps sidebar defaults to **By agent** for attributed trajectories. Agent
+branches follow ATIF parent/child trajectories and tool-result delegation
+references; the parent-step link jumps to the dispatch. Expand all / Collapse all
+show or hide each agent's own steps while keeping every agent header and the
+delegation hierarchy visible. Child agents can expand independently of folded
+parents. The entire sidebar can also be hidden.
+**Chronological** restores the flat time-ordered list without changing step
+numbers or playback. Live polls preserve manual folds; selecting a different
+step through playback, State or another panel reveals only that agent's steps.
+Older datasets without agent metadata remain a flat list. No delegation edges
+are guessed from message roles or adjacent timestamps.
+
+Checks: `npm test`, `npm run lint`, and `npm run build`. For browser interaction
+checks, run `npx playwright install chromium` once, then `npm run test:browser`
+against the running build (default `http://127.0.0.1:18768`, overridable with
+`REPLAY_TEST_URL`). Browser tests mock their own API responses, not server data.
+
+## OSWorld 2.0 tasks
+
+The Tasks page includes a separate `public/osworld-v2.dataset.json` catalog,
+merged with the original examples. Rebuild it from a local OSWorld-V2 checkout:
+
+```bash
+/home/binqiu/OSWorld-V2/.venv/bin/python3 scripts/import_osworld.py --root /home/binqiu/OSWorld-V2
+npm run deploy
+```
+
+The importer uses `evaluation_examples/test_v2.json` as the task list and
+statically reads `evaluation_examples/task_class/task_<id>.py`. It does not
+execute task modules. It exports instructions, application metadata and source
+hashes, without setup/evaluator code or reference assets. Runtime-dependent
+values remain explicit `{{variable}}` placeholders, documented in each task's
+`metadata.json`. Reimports replace only this catalog and preserve stable task
+IDs (`osworld-v2-<id>`). Missing files or invalid task definitions fail the import
+before the existing catalog is replaced. Runs remain available separately in Live.
+
+Capabilities come from the ten named category JSON files in
+`evaluation_examples/`. Every imported task retains all of its labels;
+category entries outside `test_v2.json` (such as task 082) do not add tasks.
+The Tasks page filters capabilities using OR, then intersects them with the
+selected difficulty. Snapshot and application metadata remain separate from
+capabilities; each task appears only once.
+
+Difficulty is taken directly from the team's knowledge-base per-task labels at
+`http://47.120.53.174/osworld-2.html`, with source links on task detail pages.
+The checked-in `scripts/osworld_difficulty.json` snapshot keeps regular imports
+offline and repeatable. To refresh difficulty labels, run
+`python3 scripts/import_osworld_difficulty.py`, then rerun the task importer.
+This uses baseline difficulty labels, not human completion-time estimates.
+
+Importer checks: `python3 -m unittest discover -s tests -p 'test_*osworld*.py'`.
+After building and starting Replay, run `node tests/osworld.browser.mjs` to
+check the catalog, task pages, reloads and instruction placeholders in Chromium.
 
 ## Upstream project
 
