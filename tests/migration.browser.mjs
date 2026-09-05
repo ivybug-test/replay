@@ -40,7 +40,7 @@ try {
   for (const [kind, run, task] of [
     ['native', '20260904T083833Z-execution-state-p1-n14-auto-goal-003-smoke', '0001-003'],
     ['legacy', '20260826T015622Z-e2e-fix2', '0001-002'],
-    ['live', '20260904T102321Z-observer-5turn-state-200step-003-smoke', '0001-003'],
+    ['live', '20260905T041424Z-planner-state-003-smoke', '0001-003'],
   ]) {
     await page.goto(`${base}/live/runs/${run}/tasks/${task}`)
     await page.locator('[data-step-index]').first().waitFor()
