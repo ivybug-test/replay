@@ -10,6 +10,7 @@ import { buildStepTree } from '../src/lib/stepTree'
 import StepTimeline from '../src/components/StepTimeline'
 import type { AtifTrajectory, AtifStep } from '../src/lib/atif'
 import type { Step } from '../src/lib/types'
+import { formatJsonForDisplay } from '../src/lib/format'
 
 const step = (id: number, ms: number, message: string): AtifStep => ({
   step_id: id, source: 'agent', message,
@@ -20,6 +21,25 @@ const document = (id: string, role: string, steps: AtifStep[], children: AtifTra
   agent: { name: 'omp', version: '1', extra: { osworld_harness: { agent_id: id, role } } },
   steps, subagent_trajectories: children,
 })
+
+test('JSON display can expand nested serialized tool results without altering ordinary strings', () => {
+  const input = JSON.stringify({
+    result: JSON.stringify({ data: { status: 'completed', evidence: ['folder contains files'] } }),
+    command: 'echo \'{"status":"completed"}\'',
+  })
+  assert.equal(formatJsonForDisplay(input, true), `{
+  "result": {
+    "data": {
+      "status": "completed",
+      "evidence": [
+        "folder contains files"
+      ]
+    }
+  },
+  "command": "echo '{\\"status\\":\\"completed\\"}'"
+}`)
+})
+
 function fixture() {
   const child = document('worker-id', 'gui_worker', [step(1, 200, 'Working'), step(2, 400, 'Done')])
   const delegate = { ...step(1, 100, 'Delegate'),

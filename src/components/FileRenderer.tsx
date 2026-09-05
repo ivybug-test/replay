@@ -4,6 +4,7 @@ import Markdown from './Markdown'
 import CodeBlock from './CodeBlock'
 import { ArcGridView, tryParseArcGrids } from './ArcGrid'
 import type { TaskFile } from '../lib/types'
+import { formatJsonForDisplay } from '../lib/format'
 
 const SHEET_DELIM = '@@SHEET:'
 
@@ -160,14 +161,6 @@ function BinaryView({ file }: { file: TaskFile }) {
   )
 }
 
-function prettyJson(content: string): string {
-  try {
-    return JSON.stringify(JSON.parse(content), null, 2)
-  } catch {
-    return content
-  }
-}
-
 export default function FileRenderer({ file, siblings }: { file: TaskFile; siblings?: TaskFile[] }) {
   if (file.kind === 'image') return <ImageView file={file} />
   if (file.content == null) return <BinaryView file={file} />
@@ -212,7 +205,7 @@ export default function FileRenderer({ file, siblings }: { file: TaskFile; sibli
         }
         return <ArcGridView grids={grids} />
       }
-      return <CodeBlock content={prettyJson(file.content)} language="json" path={file.path} />
+      return <CodeBlock content={formatJsonForDisplay(file.content)} language="json" path={file.path} />
     }
     case 'code':
     case 'text':

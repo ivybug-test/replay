@@ -14,7 +14,7 @@ import CodeBlock from '../components/CodeBlock'
 import { ArcGridView, tryParseArcGrids } from '../components/ArcGrid'
 import AftPanel from '../components/AftPanel'
 import type { AftReport } from '../lib/aft'
-import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, prettyModel } from '../lib/format'
+import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, formatJsonForDisplay, prettyModel } from '../lib/format'
 import { useDatasetStore, useLookups, useRunSteps } from '../lib/dataset'
 import type { DesktopFrame, ExecutionStateFeed } from '../lib/ossReplay'
 import type { Agent, HumanLabel, LabelDecision, Mutation, Run, Step, StepImage, Task, Vendor } from '../lib/types'
@@ -791,15 +791,35 @@ function StepPanel({ step }: { step: Step }) {
         </Field>
       )}
       <StepImageGallery images={(step.images ?? []).filter((image) => image.kind === 'input')} label="Input images" />
-      {step.toolCalls?.map((tc, i) => (
-        <div key={i}>
-          <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
-            Tool call
-            <Pill className="bg-violet-500/15 font-mono text-violet-300 normal-case">{tc.name}</Pill>
-          </div>
-          <CodeBlock content={prettyJson(tc.args)} language="json" lineNumbers={false} />
-        </div>
-      ))}
+      {step.toolCalls?.map((tc, i) => {
+        const args = formatJsonForDisplay(tc.args, true)
+        return (
+          <section key={i} className="overflow-hidden rounded-lg border border-violet-500/25 bg-ink-950" aria-label={`Tool call ${tc.name}`}>
+            <div className="flex min-w-0 items-center gap-2 border-b border-ink-700 bg-violet-500/[0.07] px-3 py-2">
+              <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-violet-500/15 font-mono text-[11px] text-violet-300" aria-hidden="true">↗</span>
+              <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Tool call</span>
+              <span className="min-w-0 truncate font-mono text-xs font-semibold text-violet-300" title={tc.name}>{tc.name}</span>
+              {(step.toolCalls?.length ?? 0) > 1 && (
+                <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-zinc-600">{i + 1}/{step.toolCalls!.length}</span>
+              )}
+            </div>
+            <div className="px-3 pb-3 pt-2.5">
+              <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-600">Arguments</div>
+              {args ? (
+                <CodeBlock
+                  content={args}
+                  language="json"
+                  lineNumbers={false}
+                  wrapLongLines
+                  className="max-h-96 border-ink-700/80 rounded-md"
+                />
+              ) : (
+                <div className="rounded-md border border-dashed border-ink-700 px-3 py-2 text-xs text-zinc-600">No arguments</div>
+              )}
+            </div>
+          </section>
+        )
+      })}
       {step.observation && (
         <Field label="Observation" muted><SmartContent text={step.observation} mono /></Field>
       )}
@@ -859,7 +879,7 @@ function Field({ label, children, muted }: { label: string; children: React.Reac
     <div>
       <div className="mb-1 text-xs uppercase tracking-wide text-zinc-500">{label}</div>
       <div className={clsx(
-        'max-h-96 overflow-auto rounded-lg border border-ink-700 bg-ink-950 p-3',
+        'max-h-96 min-w-0 overflow-auto rounded-lg border border-ink-700 bg-ink-950 p-3',
         muted && 'text-zinc-400',
       )}>
         {children}
@@ -878,7 +898,7 @@ function SmartContent({ text, mono }: { text: string; mono?: boolean }) {
   }
   if (mono && (t.startsWith('{') || t.startsWith('['))) {
     try {
-      return <CodeBlock content={JSON.stringify(JSON.parse(t), null, 2)} language="json" lineNumbers={false} />
+      return <CodeBlock content={formatJsonForDisplay(t, true)} language="json" lineNumbers={false} wrapLongLines />
     } catch {
       /* fall through to markdown */
     }
@@ -888,19 +908,10 @@ function SmartContent({ text, mono }: { text: string; mono?: boolean }) {
   const looksMarkdown = /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\|.*\||```)/.test(text) || /\*\*[^*]+\*\*/.test(text)
   if (mono && !looksMarkdown) {
     return (
-      <pre className="overflow-auto whitespace-pre-wrap text-[12.5px] leading-relaxed text-zinc-300">
+      <pre className="overflow-auto whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-zinc-300 [overflow-wrap:anywhere]">
         {text}
       </pre>
     )
   }
   return <Markdown content={text} />
-}
-
-function prettyJson(s?: string): string {
-  if (!s) return ''
-  try {
-    return JSON.stringify(JSON.parse(s), null, 2)
-  } catch {
-    return s
-  }
 }

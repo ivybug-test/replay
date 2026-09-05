@@ -36,6 +36,42 @@ export function fmtTokens(n: number | null | undefined): string {
   return String(n)
 }
 
+/** Format JSON for UI display. Tool payloads sometimes wrap a complete JSON
+ * object in a string (for example `{ "result": "{\\"data\\": ...}" }`).
+ * Callers can opt into expanding those embedded objects without changing
+ * ordinary strings such as shell commands or prose. */
+export function formatJsonForDisplay(content: string | null | undefined, expandEmbedded = false): string {
+  if (!content) return ''
+  try {
+    const parsed: unknown = JSON.parse(content)
+    return JSON.stringify(expandEmbedded ? expandEmbeddedJson(parsed) : parsed, null, 2)
+  } catch {
+    return content
+  }
+}
+
+function expandEmbeddedJson(value: unknown, depth = 0): unknown {
+  if (depth >= 8) return value
+  if (typeof value === 'string') {
+    const candidate = value.trim()
+    if (!((candidate.startsWith('{') && candidate.endsWith('}')) || (candidate.startsWith('[') && candidate.endsWith(']')))) return value
+    try {
+      const parsed: unknown = JSON.parse(candidate)
+      // Only promote containers. JSON-looking scalar strings should remain
+      // visibly strings rather than silently changing type in the viewer.
+      if (parsed === null || typeof parsed !== 'object') return value
+      return expandEmbeddedJson(parsed, depth + 1)
+    } catch {
+      return value
+    }
+  }
+  if (Array.isArray(value)) return value.map((item) => expandEmbeddedJson(item, depth + 1))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, expandEmbeddedJson(item, depth + 1)]))
+  }
+  return value
+}
+
 /** Prettify the ugly slash-delimited model strings some sources ship. */
 export function prettyModel(model?: string | null): string {
   if (!model) return 'not reported'

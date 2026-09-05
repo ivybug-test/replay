@@ -8,12 +8,15 @@ export default function CodeBlock({
   language,
   path,
   lineNumbers = true,
+  wrapLongLines = false,
   className,
 }: {
   content: string
   language?: string
   path?: string
   lineNumbers?: boolean
+  /** Keep long lines inside narrow containers while preserving indentation. */
+  wrapLongLines?: boolean
   className?: string
 }) {
   const lang = langFor(language, path)
@@ -21,8 +24,8 @@ export default function CodeBlock({
   const html = useMemo(() => lines.map((l) => highlight(l, language, path)), [lines, language, path])
 
   return (
-    <div className={clsx('overflow-auto rounded-lg border border-line bg-code', className)}>
-      <table className="w-full border-collapse font-mono text-[12.5px] leading-relaxed">
+    <div className={clsx('rounded-lg border border-line bg-code', wrapLongLines ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto', className)}>
+      <table className={clsx('w-full border-collapse font-mono text-[12.5px] leading-relaxed', wrapLongLines && 'table-fixed')}>
         <tbody>
           {html.map((h, i) => (
             <tr key={i} className="hover:bg-white/[0.03]">
@@ -31,7 +34,13 @@ export default function CodeBlock({
                   {i + 1}
                 </td>
               )}
-              <td className="hljs whitespace-pre px-3 align-top text-zinc-200" dangerouslySetInnerHTML={{ __html: h || ' ' }} />
+              <td
+                className={clsx(
+                  'hljs px-3 align-top text-zinc-200',
+                  wrapLongLines ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]' : 'whitespace-pre',
+                )}
+                dangerouslySetInnerHTML={{ __html: h || ' ' }}
+              />
             </tr>
           ))}
         </tbody>

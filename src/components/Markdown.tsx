@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
-import { highlight } from '../lib/highlight'
 import { ArcGridView, readArcGridBlock } from './ArcGrid'
+import CodeBlock from './CodeBlock'
 
 // ---------------------------------------------------------------------------
 // Dependency-free Markdown renderer tuned for agent output (reports, tables,
@@ -22,7 +22,7 @@ function inline(text: string, keyBase: string): ReactNode[] {
     const k = `${keyBase}-${i++}`
     if (tok.startsWith('`')) {
       nodes.push(
-        <code key={k} className="rounded bg-ink-800 px-1 py-0.5 font-mono text-[12px] text-accent">
+        <code key={k} className="break-words rounded bg-ink-800 px-1 py-0.5 font-mono text-[12px] text-accent [overflow-wrap:anywhere]">
           {tok.slice(1, -1)}
         </code>,
       )
@@ -104,11 +104,7 @@ export default function Markdown({ content, className = '' }: { content: string;
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++])
       i++ // closing fence
-      blocks.push(
-        <pre key={key++} className="hljs my-2 overflow-x-auto rounded-lg border border-line bg-code p-3 text-[12.5px] leading-relaxed text-zinc-200">
-          <code dangerouslySetInnerHTML={{ __html: highlight(buf.join('\n'), lang) }} />
-        </pre>,
-      )
+      blocks.push(<CodeBlock key={key++} content={buf.join('\n')} language={lang} lineNumbers={false} wrapLongLines className="my-2 max-h-96" />)
       continue
     }
 
@@ -198,8 +194,8 @@ export default function Markdown({ content, className = '' }: { content: string;
     ) {
       buf.push(lines[i++])
     }
-    blocks.push(<p key={key++} className="text-zinc-300">{inline(buf.join(' '), `p${key}`)}</p>)
+    blocks.push(<p key={key++} className="break-words text-zinc-300 [overflow-wrap:anywhere]">{inline(buf.join(' '), `p${key}`)}</p>)
   }
 
-  return <div className={`space-y-1.5 text-sm leading-relaxed ${className}`}>{blocks}</div>
+  return <div className={`min-w-0 space-y-1.5 text-sm leading-relaxed ${className}`}>{blocks}</div>
 }
