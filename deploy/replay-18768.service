@@ -1,7 +1,7 @@
 [Unit]
-Description=Replay trajectory workbench on port 18768
-After=network-online.target oss-replay-18767.service
-Wants=network-online.target
+Description=Replay trajectory workbench on port 18768 (standalone backend)
+After=network-online.target replay-backend-18769.service
+Wants=network-online.target replay-backend-18769.service
 
 [Service]
 Type=simple
@@ -10,11 +10,14 @@ ExecStart=/usr/bin/node /home/binqiu/replay/server.mjs
 Environment=NODE_ENV=production
 Environment=REPLAY_HOST=0.0.0.0
 Environment=REPLAY_PORT=18768
-Environment=REPLAY_BACKEND_URL=http://127.0.0.1:18767
-Environment=REPLAY_OSS_ENV_FILE=/home/binqiu/OSWorld-V2/.env
+Environment=REPLAY_BACKEND_URL=http://127.0.0.1:18769
+Environment=REPLAY_BACKEND_MODE=standalone
+Environment=REPLAY_STATIC_ROOT=dist
 Restart=on-failure
-RestartSec=3s
+RestartSec=5s
 TimeoutStopSec=30s
+MemoryHigh=384M
+MemoryMax=512M
 
 [Install]
 WantedBy=default.target
