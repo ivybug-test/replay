@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchTaskRuns, type TaskRunPage, type ExecutionSummary } from '../lib/ossReplay'
-import { fmtDuration } from '../lib/format'
+import { fmtDuration, fmtScore } from '../lib/format'
 
 /** OSS execution summaries are queried independently of the frontend task catalog. */
 export default function TaskExecutionHistory({ taskId }: { taskId: string }) {
@@ -44,10 +44,8 @@ export default function TaskExecutionHistory({ taskId }: { taskId: string }) {
     setFilters({ ...next, cursor: '' })
   }
   const syncStatus = page?.sync.status
-  const syncMessage = syncStatus === 'pending' || syncStatus === 'syncing'
-    ? 'Updating execution history. More runs may appear shortly.'
-    : syncStatus === 'stale' || syncStatus === 'failed'
-      ? 'Showing saved history. The latest update is incomplete.' : null
+  const syncMessage = syncStatus === 'stale' || syncStatus === 'failed'
+    ? 'Showing saved history. The latest update is incomplete.' : null
 
   return (
     <section data-tour="task-runs" data-testid="oss-task-runs">
@@ -93,7 +91,7 @@ export default function TaskExecutionHistory({ taskId }: { taskId: string }) {
             <td className="px-4 py-3 text-zinc-400">{run.framework || '—'}</td>
             <td className="px-4 py-3 text-zinc-300">{run.status}</td>
             <td className="px-4 py-3 text-zinc-400">{run.evaluation_status || '—'}</td>
-            <td className="px-4 py-3 tabular-nums text-zinc-300">{run.score ?? '—'}</td>
+            <td className="px-4 py-3 tabular-nums text-zinc-300">{fmtScore(run.score)}</td>
             <td className="px-4 py-3 tabular-nums text-zinc-300">{run.duration_ms == null ? '—' : fmtDuration(run.duration_ms / 1000)}</td>
             <td className="px-4 py-3"><Link className="btn-ghost whitespace-nowrap" to={`/live/runs/${encodeURIComponent(run.batch_id)}/tasks/${encodeURIComponent(run.task_key)}`}>View trajectory →</Link></td>
           </tr>)}</tbody>

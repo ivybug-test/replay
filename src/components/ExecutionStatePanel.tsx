@@ -47,6 +47,7 @@ function PlannerCard({ event, onJump }: {
 }) {
   const state = event.record as unknown as PlannerStateV1
   const { plan, budget } = state
+  const contract = plan.task_contract
   const total = plan.completed.length + plan.remaining.length
   const percent = budget.maxTurns == null || budget.maxTurns === 0
     ? null : Math.min(100, Math.round(budget.usedTurns / budget.maxTurns * 100))
@@ -76,6 +77,32 @@ function PlannerCard({ event, onJump }: {
           <div className={clsx('h-full rounded-full', percent >= 90 ? 'bg-rose-400' : percent >= 70 ? 'bg-amber-400' : 'bg-sky-400')} style={{ width: `${percent}%` }} />
         </div>}
       </div>
+
+      {contract && <div className="mt-3 rounded-lg border border-violet-400/25 bg-violet-400/[0.04] p-2.5" data-task-contract>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Task contract</span>
+          <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-medium',
+            contract.review === 'approved' ? 'bg-emerald-500/15 text-emerald-300'
+              : contract.review === 'rejected' ? 'bg-rose-500/15 text-rose-300'
+                : 'bg-amber-500/15 text-amber-300')}>{contract.review}</span>
+        </div>
+        <ul className="mt-2 space-y-1.5" aria-label="Global requirements">
+          {contract.requirements.map(item => <li key={item.id} className="flex gap-2 text-xs">
+            <span className={clsx('mt-0.5 h-2 w-2 shrink-0 rounded-full',
+              item.status === 'verified' ? 'bg-emerald-400' : item.status === 'claimed' ? 'bg-sky-400'
+                : item.status === 'failed' ? 'bg-rose-400' : item.status === 'unknown' ? 'bg-amber-400' : 'bg-zinc-600')} />
+            <span className="min-w-0"><span className="font-mono text-zinc-500">{item.id}</span>{' '}
+              <span className="text-zinc-200">{item.text}</span>{' '}
+              <span className="text-[10px] uppercase text-zinc-500">{item.status}</span></span>
+          </li>)}
+        </ul>
+        {!!contract.deliverables.length && <div className="mt-2 border-t border-ink-700 pt-2">
+          <p className="text-[10px] uppercase tracking-wide text-zinc-500">Deliverables</p>
+          {contract.deliverables.map(item => <p key={item.id} className="mt-1 break-all font-mono text-[10px] text-zinc-300">
+            {item.id} · {item.operation === 'modify_in_place' ? 'modify in place' : 'create'} · {item.path}
+          </p>)}
+        </div>}
+      </div>}
 
       {total ? <ol className="mt-3 space-y-2" aria-label="Planner nodes">
         {plan.completed.map(node => <PlanNode key={node.id} node={node} status={node.outcome} />)}

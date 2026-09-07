@@ -22,7 +22,11 @@ export function fmtPct(x: number): string {
 }
 
 export function fmtReward(x: number | null | undefined): string {
-  return x == null ? '—' : x.toFixed(2)
+  return fmtScore(x)
+}
+
+export function fmtScore(x: number | null | undefined): string {
+  return x == null ? '—' : x.toFixed(3)
 }
 
 export function fmtInt(x: number): string {
@@ -48,6 +52,23 @@ export function formatJsonForDisplay(content: string | null | undefined, expandE
   } catch {
     return content
   }
+}
+
+/** Decode the JSON-string payload emitted inside delegated task-result output
+ * wrappers. The wrapper itself is useful provenance, but displaying its inner
+ * `"line one\\nline two"` literally destroys the output's original layout. */
+export function formatObservationForDisplay(content: string): string {
+  return content.replace(
+    /(<output>\r?\n)([\s\S]*?)(\r?\n<\/output>)/g,
+    (match, open: string, body: string, close: string) => {
+      try {
+        const parsed: unknown = JSON.parse(body.trim())
+        return typeof parsed === 'string' ? `${open}${parsed}${close}` : match
+      } catch {
+        return match
+      }
+    },
+  )
 }
 
 function expandEmbeddedJson(value: unknown, depth = 0): unknown {

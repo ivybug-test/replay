@@ -1,7 +1,10 @@
 import { atifTrajectoryToSteps } from './atifToViewer'
 import { observerEvents, plannerEvents } from './observerFeed'
 import { parseAtifTrajectory, type AtifTrajectory } from './atif'
-import { atifLiveToTrajectory, type AtifLiveStream } from './atifLive'
+import {
+  atifLiveToTrajectory, mergeAtifLiveSnapshot,
+  type AtifLiveSnapshot, type AtifLiveStream,
+} from './atifLive'
 import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
 import { parseOsworldAtifExtensions } from './osworldAtifExtra'
 import type { Agent, Run, RunStatus, Task, Vendor } from './types'
@@ -43,12 +46,6 @@ export interface BatchDocument {
 interface TimelineStamp {
   at_ms: number
   frame_index?: number
-}
-
-interface TimelineWindow {
-  duration_ms: number
-  terminal: boolean
-  timeline?: { agent: TimelineStamp[]; desktop: TimelineStamp[] }
 }
 
 export interface ViewerBundle {
@@ -99,7 +96,7 @@ export interface ExecutionStateFeed {
 }
 
 const apiBase = String(import.meta.env.VITE_REPLAY_API_BASE ?? '').replace(/\/$/, '')
-const atifLiveCache = new Map<string, AtifLiveStream>()
+const atifLiveCache = new Map<string, AtifLiveSnapshot>()
 export const standaloneBackend = import.meta.env.VITE_REPLAY_BACKEND_MODE === 'standalone'
 
 export interface ExecutionSummary {
@@ -124,10 +121,199 @@ export interface TaskRunPage {
   sync: { status: string; last_success: string | null; failed_batches?: number }
 }
 
+export interface TaskStat {
+  task_id: string
+  runs: number
+  scored: number
+  passed: number
+  full_marks: number
+  partials: number
+  zeros: number
+  mean_score: number | null
+  completed: number
+  pass_rate: number | null
+  status_counts: Record<string, number>
+  latest: Pick<ExecutionSummary,
+    'batch_id' | 'batch_name' | 'task_key' | 'status' | 'score' | 'started_at' | 'model' | 'framework'> | null
+}
+
+export interface TaskStatsPayload {
+  tasks: TaskStat[]
+  task_count: number
+  runs: number
+  sync: { status: string; last_success: string | null; failed_batches?: number }
+}
+
+export interface LeaderboardRow {
+  model: string
+  framework: string
+  frameworks: string[]
+  attempts: number
+  scored: number
+  passed: number
+  completed: number
+  task_count: number
+  scored_task_count: number
+  batch_count: number
+  completion_rate: number
+  pass_rate: number | null
+  score: { avg: number | null; min: number | null; max: number | null }
+  duration_ms_avg: number | null
+}
+
+export interface LeaderboardPayload {
+  rows: LeaderboardRow[]
+  attempts: number
+  excluded_smoke_attempts: number
+  excluded_out_of_suite_attempts: number
+  aggregation: 'mean_per_model_task'
+  filters: { date_from: string | null; date_to: string | null; include_smoke: boolean }
+  sync: { status: string; last_success: string | null; failed_batches?: number }
+}
+
+export interface ExecutionAnalysisReport {
+  report_id?: string
+  revision?: number
+  model?: string
+  content?: string
+  content_format?: string
+  created_at?: string
+  evidence?: unknown[]
+  payload?: {
+    schema_version?: string
+    content?: string
+    content_format?: string
+    model?: string
+    evidence?: unknown[]
+    [key: string]: unknown
+  }
+}
+
+export interface AnalysisJob {
+  job_id: string
+  status: string
+  stage?: string
+  error?: { message?: string } | null
+  model?: string
+  progress?: {
+    scanned_tasks?: number
+    total_tasks?: number
+    phase?: string
+    failed_phase?: string
+    percent?: number
+    chunks_completed?: number
+    evidence_requests?: number
+    task_analyses_read?: number
+    reused?: number
+    task_reports?: { completed?: number; total?: number; running?: number; failed?: number }
+  }
+}
+
+export interface ExecutionAnalysisState {
+  run_id: string
+  task_key: string
+  report: ExecutionAnalysisReport | null
+  report_origin?: string | null
+  oss_status?: string | null
+  job: AnalysisJob | null
+}
+
+export interface AnalysisModel {
+  id: string
+  model: string
+  displayName: string
+  description: string
+  isDefault: boolean
+  defaultReasoningEffort?: string | null
+  supportedReasoningEfforts?: Array<{ reasoningEffort: string; description?: string }>
+  inputModalities?: string[]
+}
+
+export interface AftRunReportSummary {
+  report_id: string
+  run_id: string
+  revision: number
+  model: string
+  taxonomy_version: string
+  created_at: string
+  job_status?: string | null
+}
+
+export interface AftRunStatus {
+  job: AnalysisJob | null
+  report: AftRunReportSummary | null
+}
+
+export interface ResearchSource {
+  source_id: string
+  title: string
+  url: string
+  published_at?: string
+  source_type?: string
+  organization?: string
+  authority_tier?: string
+  authority_weight?: number
+  claim_scope?: string
+  reproducibility_level?: string
+  independence_group?: string
+  version_or_commit?: string
+  support_kind?: 'definition' | 'supporting'
+  evidence_relation?: string
+  effective_weight?: number
+  support_note?: string
+  support_locator?: string
+  support_url?: string
+}
+
+export interface ProblemTag {
+  version_id: string
+  tag_id: string
+  name_zh: string
+  name_en: string
+  category: string
+  description: string
+  detection_signals: string[]
+  exclusions: string[]
+  default_severity: string
+  source_basis: string
+  authority_weight: number
+  research_priority: 'core' | 'supported' | 'supplemental' | 'source-taxonomy' | 'core-harness'
+  fault_side?: string
+  definition_source_id?: string
+  definition_locator?: string
+  active: boolean
+  sources: ResearchSource[]
+}
+
+export interface AftRunReport extends AftRunReportSummary {
+  content: string
+  document: {
+    schema_version: string
+    summary: Record<string, unknown>
+    tasks: Array<Record<string, unknown>>
+    issues: Array<Record<string, unknown>>
+  }
+}
+
 export function fetchTaskRuns(taskId: string, filters: { cursor?: string; model?: string; status?: string }, signal?: AbortSignal) {
   const query = new URLSearchParams({ task_id: taskId, limit: '50' })
   for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value)
   return getJson<TaskRunPage>(`/api/task-runs?${query}`, signal)
+}
+
+export function fetchTaskStats(signal?: AbortSignal) {
+  return getJson<TaskStatsPayload>('/api/task-stats', signal)
+}
+
+export function fetchLeaderboard(filters: {
+  dateFrom?: string; dateTo?: string; includeSmoke?: boolean
+}, signal?: AbortSignal) {
+  const query = new URLSearchParams()
+  if (filters.dateFrom) query.set('date_from', filters.dateFrom)
+  if (filters.dateTo) query.set('date_to', filters.dateTo)
+  if (filters.includeSmoke) query.set('include_smoke', 'true')
+  const suffix = query.size ? `?${query}` : ''
+  return getJson<LeaderboardPayload>(`/api/leaderboard${suffix}`, signal)
 }
 
 function apiPath(path: string): string {
@@ -147,6 +333,66 @@ async function getOptionalJson<T>(path: string, signal?: AbortSignal): Promise<T
   return response.json() as Promise<T>
 }
 
+async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(apiPath(path), {
+    method: 'POST', cache: 'no-store', signal,
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  if (!response.ok) throw new Error(`Replay API returned HTTP ${response.status}`)
+  return response.json() as Promise<T>
+}
+
+export function fetchExecutionAnalysis(batchId: string, taskKey: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ run: batchId, task: taskKey })
+  return getJson<ExecutionAnalysisState>(`/api/execution-analysis?${query}`, signal)
+}
+
+export function fetchAnalysisModels(signal?: AbortSignal) {
+  return getJson<{ models: AnalysisModel[] }>('/api/analysis-models', signal)
+}
+
+export function startExecutionAnalysis(
+  batchId: string, taskKey: string, model?: string, signal?: AbortSignal, force = false,
+) {
+  return postJson<ExecutionAnalysisState>('/api/execution-analysis', {
+    run: batchId, task: taskKey, ...(model ? { model } : {}), ...(force ? { force: true } : {}),
+  }, signal)
+}
+
+export function fetchAftRunStatuses(signal?: AbortSignal) {
+  return getJson<{ runs: Record<string, AftRunStatus> }>('/api/run-analysis-statuses', signal)
+}
+
+export function fetchRunAnalysis(batchId: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ run: batchId })
+  return getJson<{ run_id: string; job: AnalysisJob | null; report: AftRunReportSummary | null }>(
+    `/api/run-analysis?${query}`, signal,
+  )
+}
+
+export function startRunAnalysis(batchId: string, model?: string, signal?: AbortSignal, force = false) {
+  return postJson<{ run_id: string; job: AnalysisJob | null; report: AftRunReportSummary | null }>(
+    '/api/run-analysis', { run: batchId, ...(model ? { model } : {}), ...(force ? { force: true } : {}) }, signal,
+  )
+}
+
+export function fetchProblemTags(signal?: AbortSignal) {
+  return getJson<{
+    version: Record<string, unknown>
+    research_map_version?: string
+    research_foundation?: ResearchSource[]
+    tags: ProblemTag[]
+  }>('/api/problem-tags', signal)
+}
+
+export function fetchAftReports(signal?: AbortSignal) {
+  return getJson<{ reports: AftRunReportSummary[] }>('/api/aft-reports', signal)
+}
+
+export function fetchAftReport(reportId: string, signal?: AbortSignal) {
+  return getJson<AftRunReport>(`/api/aft-reports/${encodeURIComponent(reportId)}`, signal)
+}
+
 async function getAtifLive(
   batchId: string,
   taskKey: string,
@@ -156,16 +402,13 @@ async function getAtifLive(
   const key = `${batchId}/${taskKey}`
   const prior = atifLiveCache.get(key)
   const liveQuery = new URLSearchParams(query)
-  liveQuery.set('after', String(prior?.records.length ?? 0))
+  liveQuery.set('after', String(prior?.cursor ?? 0))
   const delta = await getOptionalJson<AtifLiveStream>(`/api/atif-live?${liveQuery}`, signal)
-  if (!delta) return prior ?? null
-  const records = prior && delta.start_line === prior.records.length
-    ? [...prior.records, ...delta.records]
-    : delta.records
-  const complete = { ...delta, start_line: 0, records }
+  if (!delta) return prior?.stream ?? null
+  const complete = mergeAtifLiveSnapshot(prior, delta)
   atifLiveCache.set(key, complete)
   if (atifLiveCache.size > 8) atifLiveCache.delete(atifLiveCache.keys().next().value!)
-  return complete
+  return complete.stream
 }
 
 export async function fetchLiveRuns(date?: string | null, signal?: AbortSignal) {
@@ -188,7 +431,7 @@ export async function fetchViewerBundle(
   signal?: AbortSignal,
 ): Promise<ViewerBundle> {
   const query = new URLSearchParams({ run: batchId, task: taskKey })
-  const [batch, source, window] = await Promise.all([
+  const [batch, source] = await Promise.all([
     fetchBatch(batchId, signal),
     getOptionalJson<AtifTrajectory>(`/api/trajectory?${query}`, signal).then(async (terminalTrajectory) => {
       if (terminalTrajectory) {
@@ -217,11 +460,13 @@ export async function fetchViewerBundle(
       }
       return { trajectory: null, work, hasMore: false }
     }),
-    getJson<TimelineWindow>(`/api/window?${query}&center_ms=0&before_ms=5000&after_ms=5000`, signal),
   ])
   const taskSummary = batch.tasks.find((task) => task.key === taskKey)
   if (!taskSummary) throw new Error(`Task ${taskKey} is not present in ${batchId}.`)
-  return { ...toViewerBundle(batch, taskSummary, source.work, source.trajectory, window.timeline?.desktop ?? []),
+  // Native trajectories and live ATIF pages carry their desktop timeline in
+  // the harness extension. Do not block first paint on /window, which must
+  // scan the complete history of a long-running stream.
+  return { ...toViewerBundle(batch, taskSummary, source.work, source.trajectory, []),
     hasMore: source.hasMore }
 }
 

@@ -11,6 +11,12 @@ export interface AtifLiveStream {
   records: Record<string, unknown>[]
 }
 
+export interface AtifLiveSnapshot {
+  /** Cursor in the immutable source stream; independent of compacted size. */
+  cursor: number
+  stream: AtifLiveStream
+}
+
 type Loose = Record<string, any>
 
 interface LiveDocument {
@@ -26,6 +32,45 @@ function object(value: unknown): Loose {
 
 function clone<T>(value: T): T {
   return structuredClone(value)
+}
+
+/**
+ * Bound browser memory while a live stream grows. Step upserts are last-wins
+ * state, and progress updates are transient UI snapshots that the trajectory
+ * materializer intentionally does not consume.
+ */
+export function compactAtifLiveRecords(records: Record<string, unknown>[]): Record<string, unknown>[] {
+  const steps = new Map<string, Record<string, unknown>>()
+  const material: Record<string, unknown>[] = []
+  for (const record of records) {
+    const patch = object(record)
+    if (patch.op === 'tool_execution_update') continue
+    if (patch.op === 'begin_step' || patch.op === 'append_step' || patch.op === 'upsert_step') {
+      const step = object(patch.step)
+      if (typeof patch.trajectory_id === 'string' && Number.isInteger(step.step_id)) {
+        steps.set(`${patch.trajectory_id}\0${step.step_id}`, record)
+        continue
+      }
+    }
+    material.push(record)
+  }
+  // Steps must precede their retained tool start/end/seal patches when the
+  // compact snapshot is materialized again.
+  return [...steps.values(), ...material]
+}
+
+export function mergeAtifLiveSnapshot(
+  prior: AtifLiveSnapshot | undefined,
+  delta: AtifLiveStream,
+): AtifLiveSnapshot {
+  const continuing = prior && delta.start_line === prior.cursor && !delta.stream?.reset
+  const records = compactAtifLiveRecords(continuing
+    ? [...prior.stream.records, ...delta.records]
+    : delta.records)
+  return {
+    cursor: delta.start_line + delta.records.length,
+    stream: { ...delta, start_line: 0, records },
+  }
 }
 
 function validStep(value: unknown): value is AtifStep {

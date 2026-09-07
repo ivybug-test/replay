@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { Loading, StatusBadge } from '../components/ui'
 import { fetchBatch, type BatchDocument } from '../lib/ossReplay'
+import { fmtScore } from '../lib/format'
 
 export default function LiveRunDetail() {
   const { batchId = '' } = useParams()
@@ -48,7 +49,7 @@ export default function LiveRunDetail() {
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={task.status} /></td>
                   <td className="px-4 py-3 text-zinc-400">{task.agent_outcome ?? '—'}</td>
-                  <td className="px-4 py-3 tabular-nums text-zinc-300">{task.score == null ? '—' : task.score.toFixed(2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-zinc-300">{fmtScore(task.score)}</td>
                   <td className="px-4 py-3 text-right">
                     <Link
                       className="btn-ghost"

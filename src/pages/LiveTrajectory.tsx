@@ -19,6 +19,7 @@ export default function LiveTrajectory() {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     let hasBundle = false
+    let consecutiveFailures = 0
     setBundle(null)
     setError(null)
     const refresh = async () => {
@@ -26,6 +27,7 @@ export default function LiveTrajectory() {
         const next = await fetchViewerBundle(batchId, taskKey, controller.signal)
         if (controller.signal.aborted) return
         hasBundle = true
+        consecutiveFailures = 0
         setBundle(next)
         setError(null)
         const status = String(next.task.metadata?.execution_status ?? '')
@@ -33,7 +35,9 @@ export default function LiveTrajectory() {
       } catch (reason) {
         if (controller.signal.aborted) return
         if (!hasBundle) setError(String(reason))
-        timer = setTimeout(refresh, 2_000)
+        consecutiveFailures += 1
+        const retryMs = Math.min(30_000, 2_000 * (2 ** Math.min(consecutiveFailures - 1, 4)))
+        timer = setTimeout(refresh, retryMs)
       }
     }
     void refresh()

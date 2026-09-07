@@ -28,6 +28,13 @@
   .btn-primary {
     @apply btn bg-accent text-white shadow-sm shadow-accent/30 hover:bg-accent-soft;
   }
+  .btn-secondary {
+    @apply btn border border-line bg-ink-850 text-zinc-300 hover:border-ink-600 hover:bg-ink-800 hover:text-white;
+  }
+  .input {
+    @apply rounded-lg border border-line bg-ink-950 px-3 py-2 text-sm text-zinc-200 outline-none transition-colors focus:border-accent/70 disabled:cursor-not-allowed disabled:opacity-50;
+    color-scheme: dark;
+  }
   .chip {
     @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
   }

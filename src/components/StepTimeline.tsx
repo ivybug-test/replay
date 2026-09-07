@@ -7,6 +7,10 @@ import type { HumanLabel, Step } from '../lib/types'
 
 const GLYPHS: Record<string, string> = { user: '👤', system: '⚙', agent: '✦', assistant: '✦', tool: '↩' }
 
+export function formatContextSize(tokens: number): string {
+  return `${(tokens / 1_000_000).toFixed(2)}M`
+}
+
 interface Props {
   steps: Step[]
   activeStep: number
@@ -39,9 +43,15 @@ export default function StepTimeline({ steps, activeStep, labels, aftSteps, onSe
     if (lastReveal.current === key) return
     lastReveal.current = key
     if (mode !== 'agents' || !currentAgent) return
-    // Child headers remain visible under folded parents, so revealing the
-    // selected agent does not need to expand any ancestor's own steps.
-    setCollapsed((previous) => new Set([...previous].filter((id) => id !== currentAgent)))
+    // Reveal only the selected agent and its ancestor path. Sibling branches
+    // and descendants keep their current folds.
+    const path = new Set<string>()
+    let group = groups.get(currentAgent)
+    while (group) {
+      path.add(group.agent.id)
+      group = group.agent.parentId ? groups.get(group.agent.parentId) : undefined
+    }
+    setCollapsed((previous) => new Set([...previous].filter((id) => !path.has(id))))
   }, [activeStep, currentAgent, groups, mode])
 
   useEffect(() => {
@@ -58,23 +68,38 @@ export default function StepTimeline({ steps, activeStep, labels, aftSteps, onSe
   function toggle(id: string) {
     setCollapsed((previous) => {
       const next = new Set(previous)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+        const pending = [...(groups.get(id)?.children ?? [])]
+        while (pending.length) {
+          const child = pending.pop()!
+          next.add(child.agent.id)
+          pending.push(...child.children)
+        }
+      } else next.add(id)
       return next
     })
   }
 
+  function collapseAll() {
+    const next = new Set(groups.keys())
+    for (const root of roots) next.delete(root.agent.id)
+    setCollapsed(next)
+  }
+
   function row(step: Step, showAgent = false) {
     const label = labelByStep.get(step.index)
+    const isActive = step.index === activeStep
+    const contextTokens = step.tokens?.prompt
     return (
       <li key={`step-${step.index}`}>
         <button
           type="button"
           data-step-index={step.index}
-          aria-current={step.index === activeStep ? 'step' : undefined}
+          aria-current={isActive ? 'step' : undefined}
           onClick={() => onSelect(step.index)}
           className={clsx('flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors',
-            step.index === activeStep ? 'bg-ink-800 ring-1 ring-accent/40' : 'hover:bg-ink-800/50')}
+            isActive ? 'bg-ink-800 ring-1 ring-accent/40' : 'hover:bg-ink-800/50')}
         >
           <span className={clsx('mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-[11px]', ROLE_STYLES[step.role] ?? 'bg-ink-700')}>
             {GLYPHS[step.role] ?? '•'}
@@ -97,6 +122,15 @@ export default function StepTimeline({ steps, activeStep, labels, aftSteps, onSe
             {showAgent && step.agent && <span className="block truncate text-[11px] text-sky-300">{step.agent.label}</span>}
             <span className="block truncate text-zinc-200" title={stepTitle(step)}>{stepTitle(step)}</span>
           </span>
+          {contextTokens != null && Number.isFinite(contextTokens) && (
+            <span
+              className="shrink-0 tabular-nums text-xs text-zinc-400"
+              title={`Context size: ${contextTokens.toLocaleString()} tokens`}
+              aria-label={`Context size: ${formatContextSize(contextTokens)}`}
+            >
+              {formatContextSize(contextTokens)}
+            </span>
+          )}
         </button>
       </li>
     )
@@ -106,9 +140,10 @@ export default function StepTimeline({ steps, activeStep, labels, aftSteps, onSe
     const { agent } = group
     const folded = collapsed.has(agent.id)
     const active = group.steps.some((step) => step.index === activeStep)
-    // Folding hides only this agent's steps, never its delegation hierarchy.
-    const items = [
-      ...(folded ? [] : group.steps.map((step) => ({ index: step.index, child: false, node: row(step) }))),
+    // A folded branch is a single bubble. Expanding it reveals this agent's
+    // own steps and one level of child bubbles; descendants remain folded.
+    const items = folded ? [] : [
+      ...group.steps.map((step) => ({ index: step.index, child: false, node: row(step) })),
       ...group.children.map((child) => ({
         index: child.agent.delegationStepIndex ?? child.steps[0]?.index ?? Infinity,
         child: true, node: branch(child, depth + 1),
@@ -165,7 +200,7 @@ export default function StepTimeline({ steps, activeStep, labels, aftSteps, onSe
           </div>
           {mode === 'agents' && <div className="mb-2 flex justify-end gap-3 text-[11px] text-zinc-500">
             <button type="button" onClick={() => setCollapsed(new Set())} className="hover:text-zinc-200">Expand all</button>
-            <button type="button" onClick={() => setCollapsed(new Set(groups.keys()))} className="hover:text-zinc-200">Collapse all</button>
+            <button type="button" onClick={collapseAll} className="hover:text-zinc-200">Collapse all</button>
           </div>}
         </>}
       </div>

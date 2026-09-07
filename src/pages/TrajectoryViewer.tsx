@@ -10,11 +10,13 @@ import EnvironmentStage from '../components/EnvironmentStage'
 import ExecutionStatePanel from '../components/ExecutionStatePanel'
 import StepTimeline from '../components/StepTimeline'
 import { stepTitle } from '../lib/stepTree'
+import { stepIndexForTurn } from '../lib/stepNavigation'
 import CodeBlock from '../components/CodeBlock'
 import { ArcGridView, tryParseArcGrids } from '../components/ArcGrid'
 import AftPanel from '../components/AftPanel'
+import BackendExecutionAnalysis from '../components/BackendExecutionAnalysis'
 import type { AftReport } from '../lib/aft'
-import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, formatJsonForDisplay, prettyModel } from '../lib/format'
+import { FORMAT_LABELS, ROLE_STYLES, fmtDuration, fmtReward, fmtTokens, formatJsonForDisplay, formatObservationForDisplay, prettyModel } from '../lib/format'
 import { useDatasetStore, useLookups, useRunSteps } from '../lib/dataset'
 import type { DesktopFrame, ExecutionStateFeed } from '../lib/ossReplay'
 import type { Agent, HumanLabel, LabelDecision, Mutation, Run, Step, StepImage, Task, Vendor } from '../lib/types'
@@ -206,11 +208,18 @@ export default function TrajectoryViewer({
   // Deep-link a step via ?step=N (used by the guided tour and shareable links).
   const [searchParams] = useSearchParams()
   const stepParam = searchParams.get('step')
+  const atMsParam = searchParams.get('at_ms')
+  const turnParam = searchParams.get('turn')
+  const panelParam = searchParams.get('panel')
   const [activeStep, setActiveStep] = useState(() => {
     const n = Number(stepParam)
     return stepParam != null && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   })
-  const [panel, setPanel] = useState<'step' | 'state' | 'artifacts' | 'analysis' | 'aft' | 'labels'>('step')
+  type RailPanel = 'step' | 'state' | 'artifacts' | 'analysis' | 'aft' | 'labels'
+  const [panel, setPanel] = useState<RailPanel>(() => (
+    ['step', 'state', 'artifacts', 'analysis', 'aft', 'labels'].includes(panelParam ?? '')
+      ? panelParam as RailPanel : 'step'
+  ))
   const [executionState, setExecutionState] = useState(initialExecutionState)
   const [stateLoading, setStateLoading] = useState(false)
   const [stateError, setStateError] = useState<string | null>(null)
@@ -303,10 +312,37 @@ export default function TrajectoryViewer({
   }, [executionState, loadExecutionState, stateLoading])
 
   useEffect(() => {
-    if (stepParam == null) return
-    const n = Number(stepParam)
-    if (Number.isFinite(n) && n >= 0) selectStep(Math.floor(n))
-  }, [stepParam, selectStep])
+    if (!loadedSteps.length) return
+
+    // Analysis links include both Turn and timestamp. Turn is authoritative:
+    // timestamps may be absent (and therefore 0), while the report's global
+    // Turn always identifies the exact chronological Agent step.
+    if (turnParam != null) {
+      const turn = Number(turnParam)
+      const index = stepIndexForTurn(loadedSteps, turn)
+      if (index != null) {
+        setPlaying(false)
+        selectStep(index)
+        return
+      }
+    }
+
+    if (stepParam != null) {
+      const step = Number(stepParam)
+      if (Number.isFinite(step) && step >= 0) {
+        setPlaying(false)
+        selectStep(Math.floor(step))
+        return
+      }
+    }
+
+    if (atMsParam == null) return
+    const atMs = Number(atMsParam)
+    if (!Number.isFinite(atMs) || atMs < 0) return
+    setPlaying(false)
+    setActiveStep(stepIndexAt(loadedSteps, atMs))
+    moveDesktopCursor(atMs)
+  }, [atMsParam, loadedSteps, moveDesktopCursor, selectStep, stepParam, turnParam])
 
   const handleAftReport = useCallback((r: AftReport | null) => {
     const s = new Set<number>()
@@ -549,15 +585,22 @@ export default function TrajectoryViewer({
             ) : panel === 'analysis' ? (
               <GradePanel grade={run.grade} failureReason={run.failureReason} verifierLog={verifierLog} />
             ) : panel === 'aft' ? (
-              <AftPanel
-                run={erun}
-                task={task}
-                agent={agent}
-                vendor={vendor}
-                activeStep={activeStep}
-                onJumpToStep={(i) => { setPlaying(false); selectStep(i) }}
-                onReport={handleAftReport}
-              />
+              typeof task.metadata?.batch_id === 'string' && typeof task.metadata?.task_key === 'string' ? (
+                <BackendExecutionAnalysis
+                  batchId={task.metadata.batch_id}
+                  taskKey={task.metadata.task_key}
+                />
+              ) : (
+                <AftPanel
+                  run={erun}
+                  task={task}
+                  agent={agent}
+                  vendor={vendor}
+                  activeStep={activeStep}
+                  onJumpToStep={(i) => { setPlaying(false); selectStep(i) }}
+                  onReport={handleAftReport}
+                />
+              )
             ) : panel === 'artifacts' ? (
               <RunArtifacts run={erun} activeStep={activeStep} onJump={(i) => { setPlaying(false); selectStep(i) }} />
             ) : (
@@ -891,7 +934,8 @@ function Field({ label, children, muted }: { label: string; children: React.Reac
 /** Render text as a colored ARC grid if it's a 2D number array, else pretty
  *  JSON if it parses, else Markdown. */
 function SmartContent({ text, mono }: { text: string; mono?: boolean }) {
-  const t = text.trim()
+  const displayText = mono ? formatObservationForDisplay(text) : text
+  const t = displayText.trim()
   if (t.startsWith('{') || t.startsWith('[')) {
     const grids = tryParseArcGrids(t)
     if (grids) return <ArcGridView grids={grids} />
@@ -905,13 +949,13 @@ function SmartContent({ text, mono }: { text: string; mono?: boolean }) {
   }
   // Tool observations are often plain logs, not markdown — keep them monospace
   // unless they clearly contain markdown structure.
-  const looksMarkdown = /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\|.*\||```)/.test(text) || /\*\*[^*]+\*\*/.test(text)
+  const looksMarkdown = /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\|.*\||```)/.test(displayText) || /\*\*[^*]+\*\*/.test(displayText)
   if (mono && !looksMarkdown) {
     return (
       <pre className="overflow-auto whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-zinc-300 [overflow-wrap:anywhere]">
-        {text}
+        {displayText}
       </pre>
     )
   }
-  return <Markdown content={text} />
+  return <Markdown content={displayText} preserveLineBreaks={mono} />
 }

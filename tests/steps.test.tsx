@@ -4,13 +4,16 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { atifTrajectoryToSteps } from '../src/lib/atifToViewer'
-import { atifLiveToTrajectory } from '../src/lib/atifLive'
+import { atifLiveToTrajectory, mergeAtifLiveSnapshot } from '../src/lib/atifLive'
 import { legacyTraceToAtif } from '../src/lib/legacyTraceToAtif'
 import { buildStepTree } from '../src/lib/stepTree'
-import StepTimeline from '../src/components/StepTimeline'
+import StepTimeline, { formatContextSize } from '../src/components/StepTimeline'
 import type { AtifTrajectory, AtifStep } from '../src/lib/atif'
 import type { Step } from '../src/lib/types'
-import { formatJsonForDisplay } from '../src/lib/format'
+import { formatJsonForDisplay, formatObservationForDisplay } from '../src/lib/format'
+import Markdown from '../src/components/Markdown'
+import { stepIndexForTurn } from '../src/lib/stepNavigation'
+import { uniqueSortedTurnEvidence } from '../src/lib/analysisEvidence'
 
 const step = (id: number, ms: number, message: string): AtifStep => ({
   step_id: id, source: 'agent', message,
@@ -20,6 +23,33 @@ const document = (id: string, role: string, steps: AtifStep[], children: AtifTra
   schema_version: 'ATIF-v1.8', trajectory_id: id,
   agent: { name: 'omp', version: '1', extra: { osworld_harness: { agent_id: id, role } } },
   steps, subagent_trajectories: children,
+})
+
+test('live snapshots compact upserts without confusing source cursor with retained records', () => {
+  const envelope = (op: string, extra: Record<string, unknown>) => ({
+    trace_format: 'atif-stream', stream_schema_version: 'osworld-atif-stream/v1',
+    trajectory_id: 'root', op, ...extra,
+  })
+  const first = mergeAtifLiveSnapshot(undefined, {
+    trace_format: 'atif-stream', stream_schema_version: 'osworld-atif-stream/v1',
+    start_line: 0, total_lines: 4, terminal: false, has_more: true,
+    records: [
+      envelope('upsert_step', { step: step(1, 0, 'old') }),
+      envelope('tool_execution_update', { step_id: 1, progress: { content: 'noise' } }),
+      envelope('upsert_step', { step: step(1, 0, 'new') }),
+    ],
+  })
+  assert.equal(first.cursor, 3)
+  assert.equal(first.stream.records.length, 1)
+  assert.equal((first.stream.records[0].step as AtifStep).message, 'new')
+
+  const second = mergeAtifLiveSnapshot(first, {
+    trace_format: 'atif-stream', stream_schema_version: 'osworld-atif-stream/v1',
+    start_line: 3, total_lines: 4, terminal: false, has_more: false,
+    records: [envelope('append_desktop_frame', { frame: { frame_index: 1 } })],
+  })
+  assert.equal(second.cursor, 4)
+  assert.equal(second.stream.records.length, 2)
 })
 
 test('JSON display can expand nested serialized tool results without altering ordinary strings', () => {
@@ -38,6 +68,21 @@ test('JSON display can expand nested serialized tool results without altering or
   },
   "command": "echo '{\\"status\\":\\"completed\\"}'"
 }`)
+})
+
+test('delegated observations restore serialized output line breaks', () => {
+  const input = '<task-result id="worker">\n<output>\n"## Findings\\n\\nfirst line\\nsecond line"\n</output>\n</task-result>'
+  assert.equal(
+    formatObservationForDisplay(input),
+    '<task-result id="worker">\n<output>\n## Findings\n\nfirst line\nsecond line\n</output>\n</task-result>',
+  )
+  assert.equal(formatObservationForDisplay('<output>\nnot-json\n</output>'), '<output>\nnot-json\n</output>')
+})
+
+test('markdown can preserve soft line breaks for observation output', () => {
+  const html = renderToStaticMarkup(<Markdown content={'first line\nsecond line'} preserveLineBreaks />)
+  assert.match(html, /whitespace-pre-wrap/)
+  assert.match(html, /first line\nsecond line/)
 })
 
 function fixture() {
@@ -98,6 +143,32 @@ test('legacy model inputs and messages share their real role, without guessed pa
   assert.equal(steps[1].agent?.parentId, undefined)
 })
 
+test('analysis Turn links resolve to the matching Agent step before timestamp fallback', () => {
+  const steps: Step[] = [
+    { index: 0, role: 'system' },
+    { index: 1, role: 'agent' },
+    { index: 2, role: 'tool' },
+    { index: 3, role: 'agent' },
+    { index: 4, role: 'user' },
+    { index: 5, role: 'agent', turn: 7 },
+  ]
+  assert.equal(stepIndexForTurn(steps, 2), 3)
+  assert.equal(stepIndexForTurn(steps, 7), 5)
+  assert.equal(stepIndexForTurn(steps, 8), null)
+})
+
+test('analysis evidence links are deduplicated and sorted by global Turn', () => {
+  const turns = [28, 29, 30, 31].map((global_turn) => ({
+    global_turn, turn_id: `agent:${global_turn}`,
+  }))
+  const evidence = [31, 31, 29, 30, 31, 28].map((turn, index) => ({
+    turn_id: `agent:${turn}`, timestamp_ms: index,
+  }))
+  const result = uniqueSortedTurnEvidence(evidence, turns)
+  assert.deepEqual(result.map((item) => item.globalTurn), [28, 29, 30, 31])
+  assert.equal(result.length, 4)
+})
+
 test('live lifecycle becomes the same delegation tree as an archive', () => {
   const root = fixture()
   const patch = (value: Record<string, unknown>) => ({ trace_format: 'atif-stream', stream_schema_version: 'osworld-atif-stream/v1', ...value })
@@ -127,7 +198,10 @@ test('unattributed old datasets remain navigable; orphan/cyclic parents cannot h
 })
 
 test('rendered tree exposes collapsible branches, attribution and delegation navigation', () => {
-  const html = renderToStaticMarkup(<StepTimeline steps={atifTrajectoryToSteps(fixture())} activeStep={1} labels={[]} aftSteps={new Set([1])} onSelect={() => {}} onCollapse={() => {}} />)
+  const steps = atifTrajectoryToSteps(fixture())
+  steps[1].tokens = { prompt: 72_345, completion: 100 }
+  steps[2].tokens = { prompt: 1_234_567, completion: 100 }
+  const html = renderToStaticMarkup(<StepTimeline steps={steps} activeStep={1} labels={[]} aftSteps={new Set([1])} onSelect={() => {}} onCollapse={() => {}} />)
   assert.match(html, /Agent delegation tree/)
   assert.match(html, /Collapse agent gui_worker/)
   assert.match(html, /aria-expanded="true"/)
@@ -135,6 +209,13 @@ test('rendered tree exposes collapsible branches, attribution and delegation nav
   assert.match(html, /Chronological/)
   assert.match(html, /aria-current="step"/)
   assert.match(html, /Collapse all/)
+  assert.match(html, /Context size: 0.07M/)
+  assert.match(html, /Context size: 1.23M/)
+})
+
+test('context size is formatted in millions with two decimals', () => {
+  assert.equal(formatContextSize(72_345), '0.07M')
+  assert.equal(formatContextSize(1_234_567), '1.23M')
 })
 
 test('Observer history and snapshot produce one report per interval and omit old execution metrics', () => {
@@ -163,7 +244,12 @@ test('Planner history follows the playhead and renders node outcomes and budget'
   const edit = { id: 'edit', agent: 'stateact_gui', task: 'Apply the change', max_turns: 20 }
   const first = {
     schema_version: 'planner-state/v1', cause: 'plan_updated', tool_call_id: 'plan-1',
-    plan: { version: 1, completed: [], remaining: [inspect, edit], next: inspect },
+    plan: { version: 1, task_contract: {
+      review: 'approved',
+      requirements: [{ id: 'R1', text: 'Apply the requested visible change', source: 'task', status: 'pending', claimed_by: [] }],
+      deliverables: [{ id: 'D1', path: '/home/oai/share/result.odp', operation: 'modify_in_place' }],
+      constraints: [], ambiguities: [],
+    }, completed: [], remaining: [inspect, edit], next: inspect },
     budget: { maxTurns: 200, usedTurns: 1, remainingTurns: 199 },
   }
   const second = {
@@ -180,6 +266,9 @@ test('Planner history follows the playhead and renders node outcomes and budget'
   const early = renderToStaticMarkup(<ExecutionStatePanel feed={{ version: 'harness-state/v1', counts: { planner: 2 }, events, terminal: false, duration_ms: 600 }} playheadMs={200} onJump={() => {}} />)
   assert.match(early, /Plan v1/)
   assert.match(early, /1 \/ 200 · 199 left/)
+  assert.match(early, /Task contract/)
+  assert.match(early, /Apply the requested visible change/)
+  assert.match(early, /\/home\/oai\/share\/result.odp/)
   assert.match(early, /data-plan-node="inspect" data-plan-status="next"/)
   assert.match(early, /data-plan-node="edit" data-plan-status="pending"/)
   const late = renderToStaticMarkup(<ExecutionStatePanel feed={{ version: 'harness-state/v1', counts: { planner: 2 }, events, terminal: false, duration_ms: 600 }} playheadMs={600} onJump={() => {}} />)

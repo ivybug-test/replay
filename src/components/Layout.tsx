@@ -3,21 +3,21 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Rocket, FolderTree, Upload as UploadIcon, Sparkles,
-  PanelLeftClose, PanelLeftOpen, Compass, BarChart3, RadioTower, type LucideIcon,
+  PanelLeftClose, PanelLeftOpen, Compass, BarChart3, RadioTower, Trophy, FileSearch, type LucideIcon,
 } from 'lucide-react'
 import { useDataset } from '../lib/dataset'
 import { startTour, buildTourSteps } from '../lib/tour'
 
 const nav: { to: string; label: string; Icon: LucideIcon; end?: boolean }[] = [
   { to: '/live', label: 'OSS runs', Icon: RadioTower },
+  { to: '/overview', label: 'Leaderboard', Icon: Trophy },
+  { to: '/aft-reports', label: 'AFT reports', Icon: FileSearch },
   { to: '/quickstart', label: 'Quick start', Icon: Rocket },
   { to: '/showcase', label: 'Feature showcase', Icon: Sparkles },
   { to: '/tasks', label: 'Tasks', Icon: FolderTree },
   { to: '/insights', label: 'AFT insights', Icon: BarChart3 },
   { to: '/upload', label: 'Upload', Icon: UploadIcon },
 ]
-// The /overview leaderboard page is still URL-reachable but intentionally
-// not surfaced in the sidebar — open it via /overview directly.
 
 const NAV_KEY = 'tv-nav-collapsed'
 
@@ -125,7 +125,7 @@ export function PageHeader({
   actions,
 }: {
   title: string
-  subtitle?: string
+  subtitle?: React.ReactNode
   actions?: React.ReactNode
 }) {
   return (

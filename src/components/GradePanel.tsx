@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { fmtReward } from '../lib/format'
+import { fmtReward, fmtScore } from '../lib/format'
 import type { Grade } from '../lib/types'
 
 function ScoreBar({ value, max = 1 }: { value: number; max?: number }) {
@@ -73,7 +73,7 @@ export default function GradePanel({
             <div key={s.label}>
               <div className="mb-0.5 flex items-center justify-between text-xs">
                 <span className="capitalize text-zinc-400">{s.label}</span>
-                <span className="tabular-nums text-zinc-300">{s.score.toFixed(2)}</span>
+                <span className="tabular-nums text-zinc-300">{fmtScore(s.score)}</span>
               </div>
               <ScoreBar value={s.score} max={1} />
             </div>

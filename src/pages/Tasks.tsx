@@ -11,6 +11,7 @@ import { useDatasetStore, visibleTasks } from '../lib/dataset'
 import { useAuth } from '../lib/auth'
 import type { Run, Task } from '../lib/types'
 import { osworldCapabilities, osworldCapabilityLabel } from '../lib/osworld'
+import { fetchTaskStats, type TaskStatsPayload } from '../lib/ossReplay'
 
 const DIFFICULTY: Record<string, string> = {
   easy: 'bg-emerald-500/15 text-emerald-300',
@@ -21,6 +22,14 @@ const DIFFICULTY: Record<string, string> = {
 const OSWORLD_VENDOR_ID = 'osworld-v2'
 
 interface Badge { key: string; Icon: LucideIcon; cls: string; title: string }
+
+function scorePattern(stat: import('../lib/ossReplay').TaskStat | undefined) {
+  if (!stat || stat.scored < 2) return null
+  if (stat.full_marks >= 2) return { label: '经常满分', cls: 'bg-emerald-500/15 text-emerald-300' }
+  if (stat.full_marks === 0 && stat.partials >= 2) return { label: '经常部分分', cls: 'bg-sky-500/15 text-sky-300' }
+  if (stat.full_marks + stat.partials === 0) return { label: '多次零分', cls: 'bg-rose-500/15 text-rose-300' }
+  return null
+}
 
 const LEGEND: Badge[] = [
   { key: 'aft', Icon: Sparkles, cls: 'bg-accent/15 text-accent', title: 'AFT analysis' },
@@ -73,6 +82,8 @@ export default function Tasks() {
   const [aftIds, setAftIds] = useState<Set<string>>(new Set())
   const [osworldFilters, setOsworldFilters] = useState<Set<string>>(new Set())
   const [osworldDifficulty, setOsworldDifficulty] = useState('')
+  const [taskStats, setTaskStats] = useState<TaskStatsPayload | null>(null)
+  const [taskStatsError, setTaskStatsError] = useState('')
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}aft/index.json`)
@@ -81,11 +92,34 @@ export default function Tasks() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    const refresh = () => {
+      void fetchTaskStats(controller.signal).then((payload) => {
+        setTaskStats(payload)
+        setTaskStatsError('')
+      }).catch((reason: unknown) => {
+        if (!controller.signal.aborted) {
+          setTaskStatsError(reason instanceof Error ? reason.message : 'Unknown error')
+        }
+      })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 30_000)
+    return () => {
+      window.clearInterval(timer)
+      controller.abort()
+    }
+  }, [])
+
   const runsByTask = useMemo(() => {
     const m = new Map<string, Run[]>()
     data?.runs.forEach((r) => { const a = m.get(r.taskId) ?? []; a.push(r); m.set(r.taskId, a) })
     return m
   }, [data])
+  const statsByTask = useMemo(() => new Map(
+    (taskStats?.tasks ?? []).map((stat) => [`${OSWORLD_VENDOR_ID}-${stat.task_id}`, stat]),
+  ), [taskStats])
 
   if (error) return <div className="p-8 text-rose-400">Failed to load dataset: {error}</div>
   if (!data) return <Loading />
@@ -167,6 +201,11 @@ export default function Tasks() {
                   )}
                   {vendor.id === OSWORLD_VENDOR_ID && (
                     <div className="space-y-2 bg-ink-900/40 px-5 py-3">
+                      {taskStatsError && (
+                        <div role="alert" className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                          Run statistics are temporarily unavailable: {taskStatsError}
+                        </div>
+                      )}
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Capability filters</span>
                         {(osworldFilters.size > 0 || osworldDifficulty) && (
@@ -218,9 +257,19 @@ export default function Tasks() {
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {ts.map((task) => {
                           const taskRuns = runsByTask.get(task.id) ?? []
-                          const runCount = taskRuns.length
-                          const passRate = runCount ? taskRuns.filter((r) => r.passed).length / runCount : 0
-                          const badges = taskBadges(task, taskRuns, aftIds)
+                          const indexedStat = task.source === 'osworld' ? statsByTask.get(task.id) : undefined
+                          const runCount = task.source === 'osworld' ? (indexedStat?.runs ?? 0) : taskRuns.length
+                          const passRate = task.source === 'osworld'
+                            ? indexedStat?.pass_rate
+                            : (runCount ? taskRuns.filter((r) => r.passed).length / runCount : null)
+                          const badges = taskBadges(task, task.source === 'osworld' ? [] : taskRuns, aftIds)
+                          const pattern = scorePattern(indexedStat)
+                          if (task.source === 'osworld' && indexedStat?.scored) {
+                            badges.push({ key: 'reward', Icon: Award, cls: 'bg-emerald-500/15 text-emerald-300', title: `${indexedStat.scored} scored runs` })
+                          }
+                          if (task.source === 'osworld' && runCount > 1) {
+                            badges.push({ key: 'multi', Icon: Layers, cls: 'bg-zinc-500/15 text-zinc-300', title: `${runCount} runs` })
+                          }
                           return (
                             <Link
                               key={task.id}
@@ -229,6 +278,7 @@ export default function Tasks() {
                             >
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <Pill>{FORMAT_LABELS[task.source]}</Pill>
+                                {pattern && <Pill className={pattern.cls}>{pattern.label}</Pill>}
                                 {task.difficulty && (
                                   <Pill className={DIFFICULTY[task.difficulty.toLowerCase()] ?? ''}>
                                     {task.difficulty}
@@ -257,9 +307,22 @@ export default function Tasks() {
                               )}
                               <div className="mt-auto flex items-center justify-between border-t border-ink-800 pt-2.5 text-xs text-zinc-500">
                                 <span>{task.files.length} files</span>
-                                <span>{runCount} runs</span>
-                                <span>
-                                  {runCount ? <>pass <span className="text-zinc-300">{fmtPct(passRate)}</span></> : 'no runs'}
+                                <span>{task.source === 'osworld' && !taskStats ? '— runs' : `${runCount} runs`}</span>
+                                <span className="text-right">
+                                  {task.source === 'osworld' && !taskStats
+                                    ? (taskStatsError ? 'unavailable' : 'loading…')
+                                    : runCount
+                                      ? task.source === 'osworld'
+                                        ? indexedStat?.mean_score == null
+                                          ? <span title="No scored runs yet">not scored</span>
+                                          : <span title={`满分 / 部分分 / 零分：${indexedStat.full_marks} / ${indexedStat.partials} / ${indexedStat.zeros}`}>
+                                            平均 <span className="text-zinc-300">{fmtPct(indexedStat.mean_score)}</span>
+                                            <span className="ml-1 text-zinc-600">· 满/部/零 {indexedStat.full_marks}/{indexedStat.partials}/{indexedStat.zeros}</span>
+                                          </span>
+                                        : passRate == null
+                                          ? <span title="No scored runs yet">not scored</span>
+                                          : <>pass <span className="text-zinc-300">{fmtPct(passRate)}</span></>
+                                      : 'no runs'}
                                 </span>
                               </div>
                             </Link>

@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { ArcGridView, readArcGridBlock } from './ArcGrid'
 import CodeBlock from './CodeBlock'
 
@@ -41,11 +42,15 @@ function inline(text: string, keyBase: string): ReactNode[] {
       nodes.push(<span key={k} className="text-zinc-500 line-through">{tok.slice(2, -2)}</span>)
     } else if (tok.startsWith('[')) {
       const lm = /\[([^\]]+)\]\(([^)]+)\)/.exec(tok)!
-      nodes.push(
-        <a key={k} href={lm[2]} target="_blank" rel="noreferrer" className="text-accent underline decoration-accent/40 hover:decoration-accent">
+      const external = /^(https?:)?\/\//i.test(lm[2])
+      nodes.push(lm[2].startsWith('/')
+        ? <Link key={k} to={lm[2]} className="text-accent underline decoration-accent/40 hover:decoration-accent">
+            {lm[1]}
+          </Link>
+        :
+        <a key={k} href={lm[2]} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined} className="text-accent underline decoration-accent/40 hover:decoration-accent">
           {lm[1]}
-        </a>,
-      )
+        </a>)
     } else {
       nodes.push(<em key={k} className="italic text-zinc-200">{tok.slice(1, -1)}</em>)
     }
@@ -79,7 +84,15 @@ function splitRow(line: string): string[] {
   return line.replace(/^\||\|$/g, '').split('|').map((s) => s.trim())
 }
 
-export default function Markdown({ content, className = '' }: { content: string; className?: string }) {
+export default function Markdown({
+  content,
+  className = '',
+  preserveLineBreaks = false,
+}: {
+  content: string
+  className?: string
+  preserveLineBreaks?: boolean
+}) {
   const lines = content.split('\n')
   const blocks: ReactNode[] = []
   let i = 0
@@ -154,7 +167,9 @@ export default function Markdown({ content, className = '' }: { content: string;
       while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''))
       blocks.push(
         <blockquote key={key++} className="my-2 border-l-2 border-ink-600 pl-3 text-zinc-400">
-          {inline(buf.join(' '), `bq${key}`)}
+          <span className={preserveLineBreaks ? 'whitespace-pre-wrap' : undefined}>
+            {inline(buf.join(preserveLineBreaks ? '\n' : ' '), `bq${key}`)}
+          </span>
         </blockquote>,
       )
       continue
@@ -194,7 +209,11 @@ export default function Markdown({ content, className = '' }: { content: string;
     ) {
       buf.push(lines[i++])
     }
-    blocks.push(<p key={key++} className="break-words text-zinc-300 [overflow-wrap:anywhere]">{inline(buf.join(' '), `p${key}`)}</p>)
+    blocks.push(
+      <p key={key++} className={`break-words text-zinc-300 [overflow-wrap:anywhere] ${preserveLineBreaks ? 'whitespace-pre-wrap' : ''}`}>
+        {inline(buf.join(preserveLineBreaks ? '\n' : ' '), `p${key}`)}
+      </p>,
+    )
   }
 
   return <div className={`min-w-0 space-y-1.5 text-sm leading-relaxed ${className}`}>{blocks}</div>

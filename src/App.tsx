@@ -12,6 +12,9 @@ import TrajectoryViewer from './pages/TrajectoryViewer'
 import LiveRuns from './pages/LiveRuns'
 import LiveRunDetail from './pages/LiveRunDetail'
 import LiveTrajectory from './pages/LiveTrajectory'
+import AftReports from './pages/AftReports'
+import AftReportDetail from './pages/AftReportDetail'
+import CohortReportDetail from './pages/CohortReportDetail'
 import { trackPageview } from './lib/analytics'
 
 // Router-aware page-view tracker — fires for the initial render AND every
@@ -36,6 +39,9 @@ export default function App() {
           <Route path="live/runs/:batchId/tasks/:taskKey" element={<LiveTrajectory />} />
           <Route path="quickstart" element={<QuickStart />} />
           <Route path="overview" element={<Overview />} />
+          <Route path="aft-reports" element={<AftReports />} />
+          <Route path="aft-reports/cohort/:reportId" element={<CohortReportDetail />} />
+          <Route path="aft-reports/:reportId" element={<AftReportDetail />} />
           <Route path="insights" element={<AftInsights />} />
           <Route path="showcase" element={<Showcase />} />
           <Route path="tasks" element={<Tasks />} />
