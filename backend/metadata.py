@@ -25,7 +25,7 @@ def duration_ms(start, end):
         return None
 
 
-def execution_summary(execution, result=None, state=None):
+def execution_summary(execution, result=None, state=None, public_config=None):
     task = execution.summary
     result, state = result or {}, state or {}
     if result.get("task_id") is not None and task_id(result["task_id"]) != task_id(task.get("task_id")):
@@ -33,9 +33,12 @@ def execution_summary(execution, result=None, state=None):
     if result.get("batch_id") not in (None, execution.run):
         raise OssProtocolError("Result belongs to another batch")
     evaluation = result.get("evaluation") or {}
-    config = execution.batch.get("configuration") or {}
-    if not isinstance(evaluation, dict) or not isinstance(config, dict):
+    batch_config = execution.batch.get("configuration") or {}
+    public_config = public_config or {}
+    if (not isinstance(evaluation, dict) or not isinstance(batch_config, dict)
+            or not isinstance(public_config, dict)):
         raise OssProtocolError("Invalid result/configuration")
+    config = {**batch_config, **public_config}
     # Batch owns execution status; Guest result.status must not prematurely
     # terminate an execution still undergoing Host evaluation.
     status = task.get("status") or result.get("status") or "unknown"

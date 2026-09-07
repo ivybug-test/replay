@@ -35,12 +35,30 @@ class RunsQuery(BaseModel):
                     AfterValidator(_calendar_date)] | None = None
 
 
+class LeaderboardQuery(BaseModel):
+    date_from: Annotated[str, Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+                         AfterValidator(_calendar_date)] | None = None
+    date_to: Annotated[str, Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+                       AfterValidator(_calendar_date)] | None = None
+    include_smoke: bool = False
+
+
 class BatchQuery(BaseModel):
     run: Segment
 
 
 class ExecutionQuery(BatchQuery):
     task: Segment
+
+
+class ExecutionAnalysisRequest(ExecutionQuery):
+    model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    force: bool = False
+
+
+class RunAnalysisRequest(BatchQuery):
+    model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    force: bool = False
 
 
 class TaskRunsQuery(BaseModel):

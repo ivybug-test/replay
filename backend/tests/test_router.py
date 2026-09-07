@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
+from backend.native_analysis import ExecutionAnalysisService
 from backend.catalog import CatalogService
 from backend.oss_io.client import OssError, OssNoSuchKey, OssObjectTooLarge, OssProtocolError
 from backend.replay import ReplayService
@@ -25,7 +26,10 @@ class RouterTests(unittest.TestCase):
     def setUp(self):
         self.catalog = Mock(spec=CatalogService)
         self.replay = Mock(spec=ReplayService)
-        self.client = TestClient(create_app(catalog=self.catalog, replay=self.replay))
+        self.analysis = Mock(spec=ExecutionAnalysisService)
+        self.cohorts = Mock()
+        self.client = TestClient(create_app(catalog=self.catalog, replay=self.replay,
+                                            analysis=self.analysis, cohorts=self.cohorts))
         self.addCleanup(self.client.close)
 
     def test_catalog_dispatch_preserves_payload_and_frontend_envelope(self):
@@ -57,6 +61,60 @@ class RouterTests(unittest.TestCase):
         )
         self.client.get("/api/task-runs", params={"task_id": "003"})
         self.catalog.list_task_runs.assert_called_with(task_id="003", cursor=None, limit=50, model=None, status=None)
+
+    def test_leaderboard_and_execution_analysis_dispatch(self):
+        board = {"rows": [], "attempts": 0}
+        self.catalog.leaderboard.return_value = board
+        response = self.client.get("/api/leaderboard", params={
+            "date_from": "2026-08-20", "date_to": "2026-09-05", "include_smoke": "true",
+        })
+        self.assertEqual(response.json(), board)
+        self.catalog.leaderboard.assert_called_once_with(
+            date_from="2026-08-20", date_to="2026-09-05", include_smoke=True,
+        )
+        task_stats = {"tasks": [], "task_count": 107, "runs": 0}
+        self.catalog.task_stats.return_value = task_stats
+        response = self.client.get("/api/task-stats")
+        self.assertEqual(response.json(), task_stats)
+        self.catalog.task_stats.assert_called_once_with()
+        state = {"run_id": RUN, "task_key": TASK, "report": None, "job": None}
+        self.analysis.state.return_value = state
+        response = self.client.get("/api/execution-analysis", params=EXECUTION)
+        self.assertEqual(response.json(), state)
+        self.analysis.state.assert_called_once_with(**EXECUTION)
+        models = {"models": [{"model": "gpt-5.6-sol", "isDefault": True}]}
+        self.analysis.models.return_value = models
+        response = self.client.get("/api/analysis-models")
+        self.assertEqual(response.json(), models)
+        self.analysis.models.assert_called_once_with()
+        started = {**state, "job": {"status": "queued"}}
+        self.analysis.start.return_value = started
+        response = self.client.post("/api/execution-analysis", json={
+            **EXECUTION, "model": "gpt-5.6-sol",
+        })
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), started)
+        self.analysis.start.assert_called_once_with(
+            **EXECUTION, model="gpt-5.6-sol", force=False,
+        )
+        self.analysis.taxonomy.return_value = {"version": {}, "tags": []}
+        self.assertEqual(self.client.get('/api/problem-tags').status_code, 200)
+        self.analysis.run_state.return_value = {"run_id": RUN, "job": None, "report": None}
+        self.assertEqual(self.client.get('/api/run-analysis', params={"run": RUN}).status_code, 200)
+        self.analysis.start_run.return_value = {"run_id": RUN, "job": {"status": "queued"}}
+        self.assertEqual(self.client.post('/api/run-analysis', json={
+            "run": RUN, "model": "gpt-5.6-sol",
+        }).status_code, 202)
+        self.analysis.run_statuses.return_value = {"runs": {}}
+        self.assertEqual(self.client.get('/api/run-analysis-statuses').status_code, 200)
+        self.analysis.reports.return_value = {"reports": []}
+        self.assertEqual(self.client.get('/api/aft-reports').status_code, 200)
+        self.cohorts.list_reports.return_value = {"reports": [{"report_id": "cohort-1"}]}
+        self.assertEqual(self.client.get('/api/cohort-reports').json(), {
+            "reports": [{"report_id": "cohort-1"}],
+        })
+        self.cohorts.get.return_value = {"report_id": "cohort-1", "document": {}}
+        self.assertEqual(self.client.get('/api/cohort-reports/cohort-1').json()["report_id"], "cohort-1")
 
     def test_replay_dispatch_keeps_source_documents_and_typed_arguments(self):
         routes = [
@@ -115,6 +173,7 @@ class RouterTests(unittest.TestCase):
             ("task-runs", {"task_id": "osworld-v2-003"}), ("task-runs", {"task_id": "3"}),
             ("task-runs", {"task_id": "003", "limit": "101"}),
             ("task-runs", {"task_id": "003", "cursor": ""}),
+            ("leaderboard", {"date_from": "2026-02-30"}),
             ("atif-live", {**EXECUTION, "after": "-1"}),
             ("atif-live", {**EXECUTION, "after": "1000001"}),
             ("window", {**EXECUTION, "center_ms": "-2"}),
@@ -131,6 +190,7 @@ class RouterTests(unittest.TestCase):
                 self.assertEqual(response.json()["error"]["code"], "invalid_parameters")
         self.assertEqual(self.catalog.mock_calls, [])
         self.assertEqual(self.replay.mock_calls, [])
+        self.assertEqual(self.analysis.mock_calls, [])
 
     def test_media_paths_are_relative_and_decoded_only_once(self):
         for path in ("../secret", "/etc/passwd", "images/../secret", "a//b", "a/./b",
@@ -197,9 +257,16 @@ class AppFactoryTests(unittest.TestCase):
         with TestClient(create_app()) as client:
             health = client.get("/api/health")
             self.assertEqual(health.status_code, 200)
-            self.assertEqual(health.json()["services_configured"], {"catalog": False, "replay": False})
+            self.assertEqual(health.json()["services_configured"], {
+                "catalog": False, "replay": False, "analysis": False, "cohorts": False,
+            })
             cases = {
-                "runs": {}, "batch": {"run": RUN}, "task-runs": {"task_id": "003"},
+                "runs": {}, "leaderboard": {}, "task-stats": {}, "batch": {"run": RUN},
+                "task-runs": {"task_id": "003"}, "analysis-models": {},
+                "execution-analysis": EXECUTION,
+                "problem-tags": {}, "run-analysis": {"run": RUN},
+                "run-analysis-statuses": {}, "aft-reports": {},
+                "cohort-reports": {},
                 "trajectory": EXECUTION, "atif-live": EXECUTION, "agent-work": EXECUTION,
                 "window": EXECUTION, "execution-state": EXECUTION,
                 "frame": {**EXECUTION, "frame": 0}, "atif-media": {**EXECUTION, "path": "a.png"},
@@ -208,15 +275,22 @@ class AppFactoryTests(unittest.TestCase):
             for route, params in cases.items():
                 with self.subTest(route=route):
                     self.assertEqual(client.get(f"/api/{route}", params=params).status_code, 503)
+            self.assertEqual(client.get('/api/aft-reports/report-1').status_code, 503)
+            self.assertEqual(client.get('/api/cohort-reports/report-1').status_code, 503)
             self.assertEqual(client.get("/api/trajectory").status_code, 422)
             self.assertEqual(client.get("/api/docs").status_code, 200)
             schema = client.get("/api/openapi.json").json()
-            self.assertEqual(set(schema["paths"]), {f"/api/{route}" for route in cases} | {"/api/health"})
+            self.assertEqual(set(schema["paths"]), {f"/api/{route}" for route in cases} | {
+                "/api/health", "/api/aft-reports/{report_id}",
+                "/api/cohort-reports/{report_id}",
+            })
             params = schema["paths"]["/api/atif-live"]["get"]["parameters"]
             self.assertEqual({p["name"] for p in params}, {"run", "task", "after"})
             self.assertTrue(all(p["in"] == "query" for p in params))
             error_schema = schema["paths"]["/api/atif-live"]["get"]["responses"]["422"]["content"]["application/json"]["schema"]
             self.assertEqual(error_schema["$ref"], "#/components/schemas/ErrorResponse")
+            self.assertIn("post", schema["paths"]["/api/execution-analysis"])
+            self.assertIn("post", schema["paths"]["/api/run-analysis"])
 
 
 if __name__ == "__main__":

@@ -9,12 +9,13 @@ from .artifacts import ATIF_PATHS, json_value, relative_path
 from .cache import ReadCache
 from .metadata import TERMINAL, execution_summary
 from .oss_io.client import OssNoSuchKey, OssObjectTooLarge, OssProtocolError
-from .parsers.atif_stream import STREAM_VERSION, assemble_records, descriptors, validate_records, validate_trajectory
+from .parsers.atif_stream import STREAM_VERSION, descriptors, validate_records, validate_trajectory
 from .parsers.execution_state import execution_state_feed, execution_state_extension_feed
 from .parsers.legacy_trace import annotate_for_work, build_episode_work, slice_episode_work
 from .parsers.legacy_to_atif import legacy_to_atif
 from .parsers.replay_view import (agent_stamps, frame_event, milliseconds, portable_frame,
-                                  snapshot_updates, state_extension, state_from_live, window_steps, NativeProjection)
+                                  materialize_live_trajectory, snapshot_updates, state_extension,
+                                  state_from_live, window_steps, NativeProjection)
 from .services import ImageContent, InvalidQuery, JsonDocument, ResourceNotFound
 
 
@@ -32,28 +33,66 @@ class ReplayService:
         recovery = not legacy and any(chunk['start'] != (chunks[i-1]['start'] + chunks[i-1]['count'] if i else 0)
                                      for i, chunk in enumerate(chunks))
         recovery = recovery or (not legacy and bool(chunks) and chunks[-1]['start'] + chunks[-1]['count'] != meta['total_lines'])
-        parts = []
         projection = NativeProjection() if compact else None
-        budget = self.reader.max_object_bytes * (8 if compact else 1)
+        # Compact projections consume chunks one at a time and retain only the
+        # materialized replay state.  Limiting their *aggregate* source bytes
+        # rejects long-running streams even though memory use stays bounded by
+        # one chunk plus the projection.  Non-compact reads keep the aggregate
+        # guard because they retain every returned record.
+        # Recovery also streams through source chunks. Keep only fixed-size
+        # fingerprints for overlap validation instead of retaining every
+        # historical record in memory.
+        budget = None if compact or recovery else self.reader.max_object_bytes
+        recovery_base = 0 if projection is not None else start
+        recovery_digests = [] if recovery else None
+        duplicates, recovery_exhausted, page_used = 0, True, 0
         name = 'trace-tail.jsonl' if legacy else 'trajectory-tail.jsonl'
         for chunk in chunks:
             end = chunk['start'] + chunk['count']
-            if end <= start and not recovery:
+            if end <= recovery_base:
                 continue
             path = f"{name}.chunks/{chunk['start']:012d}-{end:012d}.jsonl"
             try:
-                raw = self.reader.read_bytes(execution, path, immutable=True,
-                                             max_bytes=min(self.reader.max_object_bytes, budget - used))
+                max_bytes = self.reader.max_object_bytes if budget is None else min(
+                    self.reader.max_object_bytes, budget - used)
+                raw = self.reader.read_bytes(execution, path, immutable=True, max_bytes=max_bytes)
             except OssNoSuchKey as exc:
                 raise OssProtocolError('Published stream chunk is missing') from exc
             used += len(raw)
-            parsed = [json_value(line) for line in raw.splitlines() if line.strip()]
+            lines = [line for line in raw.splitlines() if line.strip()]
+            parsed = [json_value(line) for line in lines]
             if len(parsed) != chunk['count'] or not all(isinstance(x, dict) for x in parsed):
                 raise OssProtocolError('Chunk contents disagree with manifest')
             if not legacy:
                 validate_records(parsed)
             if recovery:
-                parts.append(parsed)
+                for offset, (line, record) in enumerate(zip(lines, parsed)):
+                    position = chunk['start'] + offset
+                    if position >= meta['total_lines']:
+                        if record.get('stream_sequence') != position + 1:
+                            raise OssProtocolError('Unpublished tail has invalid sequence')
+                        continue
+                    if position < recovery_base:
+                        continue
+                    digest = hashlib.sha256(line.strip()).digest()
+                    relative = position - recovery_base
+                    if relative < len(recovery_digests):
+                        if recovery_digests[relative] != digest:
+                            raise OssProtocolError('Conflicting overlapping records')
+                        duplicates += 1
+                    elif relative == len(recovery_digests):
+                        recovery_digests.append(digest)
+                        if projection is not None:
+                            projection.add(record)
+                        elif position >= start:
+                            records.append(record)
+                    else:
+                        raise OssProtocolError('Gap in stream records')
+                if projection is None and records:
+                    page_used += len(raw)
+                    if page_bytes is not None and page_used >= page_bytes:
+                        recovery_exhausted = False
+                        break
             elif projection is not None:
                 for record in parsed:
                     projection.add(record)
@@ -63,13 +102,12 @@ class ReplayService:
                     break
         stream = dict(meta.get('stream') or {})
         if recovery:
-            records, duplicates = assemble_records(meta, parts)
-            records = records[start:]
+            if recovery_exhausted and len(recovery_digests) != meta['total_lines'] - recovery_base:
+                raise OssProtocolError('Stream length mismatch')
             if duplicates:
                 stream['recovered_duplicate_records'] = duplicates
             if projection is not None:
-                for record in records:
-                    projection.add(record)
+                records = projection.records()
         if projection is not None:
             records = projection.records()
         has_more = not compact and start + len(records) < meta['total_lines']
@@ -256,6 +294,16 @@ class ReplayService:
         if not view['trajectory'] or not view['trajectory']['steps']:
             raise ResourceNotFound('Complete ATIF document not available; use live endpoint')
         return view['trajectory']
+
+    def get_analysis_trajectory(self, *, run: str, task: str) -> JsonDocument:
+        """Return a complete document or a compact snapshot of published live ATIF."""
+        view = self._view(run, task)
+        if view['trajectory'] and view['trajectory'].get('steps'):
+            return view['trajectory']
+        trajectory = materialize_live_trajectory(view['records'], view['terminal'])
+        if not trajectory or not trajectory.get('steps'):
+            raise ResourceNotFound('No trajectory steps available for analysis')
+        return trajectory
 
     def get_atif_live(self, *, run: str, task: str, after: int = 0) -> JsonDocument:
         """Read native append-only lines; legacy snapshots explicitly reset to line zero."""

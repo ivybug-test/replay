@@ -125,6 +125,12 @@ class ArtifactReader:
             seen.add(item["key"])
         return doc
 
+    def batch_config(self, run, *, optional=True):
+        """Read the public launch configuration used to enrich catalog metrics."""
+        run = segment(run)
+        return self.json(f"{self.root}{run}/batch-config.json", optional=optional,
+                         immutable=True)
+
     def execution(self, run, task, *, batch=None):
         run, task = segment(run), segment(task)
         batch = batch if batch is not None else self.batch(run)

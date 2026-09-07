@@ -114,6 +114,76 @@ class ServiceTests(unittest.TestCase):
             self.catalog.list_task_runs(task_id='003', cursor=first['next_cursor'], status='failed')
         self.assertEqual(len(self.catalog.list_task_runs(task_id='003', status='failed')['runs']), 1)
 
+    def test_leaderboard_aggregates_scores_and_filters_smoke_and_dates(self):
+        self.store.batch(tasks=[
+            {'key': TASK, 'task_id': '003', 'status': 'succeeded',
+             'score': 1, 'started_at': '2026-09-04T10:00:00Z',
+             'finished_at': '2026-09-04T10:01:00Z'},
+            {'key': '0002-003', 'task_id': '003', 'status': 'succeeded', 'score': 0},
+            {'key': '0003-004', 'task_id': '004', 'status': 'succeeded', 'score': 1},
+        ])
+        self.store.put(f'harness/{RUN}/batch-config.json', {
+            'model_name': 'qwen-test', 'orchestration': 'stateact', 'runtime_name': 'omp-qwen',
+        })
+        smoke = '20260905T100000Z-check-smoke'
+        self.store.batch(smoke, [{'key': TASK, 'task_id': '003', 'status': 'succeeded', 'score': 0}])
+        outside = '20260903T100000Z-outside-suite'
+        self.store.batch(outside, [{'key': TASK, 'task_id': '082', 'status': 'succeeded', 'score': 1}])
+        sync = IndexSynchronizer(self.catalog, self.index)
+        sync.scan_once()
+        board = self.catalog.leaderboard()
+        self.assertEqual(board['attempts'], 3)
+        self.assertEqual(board['excluded_smoke_attempts'], 1)
+        self.assertEqual(board['excluded_out_of_suite_attempts'], 1)
+        self.assertEqual(board['rows'][0]['model'], 'qwen-test')
+        self.assertEqual(board['rows'][0]['task_count'], 2)
+        self.assertEqual(board['rows'][0]['scored_task_count'], 2)
+        self.assertEqual(board['rows'][0]['pass_rate'], 0.75)
+        self.assertEqual(board['rows'][0]['score']['avg'], 0.75)
+        self.assertEqual(board['rows'][0]['score']['min'], 0.5)
+        self.assertEqual(board['rows'][0]['score']['max'], 1)
+        self.assertEqual(board['rows'][0]['duration_ms_avg'], 60000)
+        self.assertEqual(self.catalog.leaderboard(date_from='2026-09-05')['attempts'], 0)
+        self.assertEqual(self.catalog.leaderboard(include_smoke=True)['attempts'], 4)
+        with self.assertRaises(InvalidQuery):
+            self.catalog.leaderboard(date_from='2026-09-05', date_to='2026-09-04')
+
+        stats = self.catalog.task_stats()
+        self.assertEqual(stats['task_count'], 107)
+        task = next(item for item in stats['tasks'] if item['task_id'] == '003')
+        self.assertEqual((task['runs'], task['scored'], task['passed']), (3, 3, 1))
+        self.assertEqual((task['full_marks'], task['partials'], task['zeros']), (1, 0, 2))
+        self.assertAlmostEqual(task['mean_score'], 1 / 3)
+        self.assertAlmostEqual(task['pass_rate'], 1 / 3)
+        self.assertEqual(task['latest']['batch_id'], smoke)
+        self.assertEqual(next(item for item in stats['tasks'] if item['task_id'] == '004')['runs'], 1)
+
+    def test_leaderboard_ranks_unique_coverage_before_task_average_score(self):
+        def attempt(batch_id, task_key, task_id, model, score):
+            return {
+                'batch_id': batch_id, 'batch_name': batch_id, 'task_key': task_key,
+                'task_id': task_id, 'model': model, 'framework': 'stateact',
+                'status': 'succeeded', 'score': score,
+            }
+
+        self.index.replace_batch('20260901T000000Z-narrow', [
+            attempt('20260901T000000Z-narrow', '0001-001', '001', 'narrow-perfect', 1),
+        ])
+        self.index.replace_batch('20260901T000001Z-wide-low', [
+            attempt('20260901T000001Z-wide-low', '0001-001', '001', 'wide-low', 0),
+            attempt('20260901T000001Z-wide-low', '0002-002', '002', 'wide-low', 0),
+        ])
+        self.index.replace_batch('20260901T000002Z-wide-high', [
+            attempt('20260901T000002Z-wide-high', '0001-001', '001', 'wide-high', 1),
+            attempt('20260901T000002Z-wide-high', '0002-002', '002', 'wide-high', 1),
+        ])
+
+        rows = self.index.leaderboard()['rows']
+        self.assertEqual([row['model'] for row in rows], [
+            'wide-high', 'wide-low', 'narrow-perfect',
+        ])
+        self.assertEqual([row['task_count'] for row in rows], [2, 2, 1])
+
     def test_index_failure_retains_previous_data_and_complete_scan_removes_deleted(self):
         sync = IndexSynchronizer(self.catalog, self.index)
         sync.scan_once()
@@ -173,6 +243,11 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(state['counts']['goal'], 1)
         with self.assertRaises(ResourceNotFound):
             self.replay.get_trajectory(run=RUN, task=TASK)
+        snapshot = self.replay.get_analysis_trajectory(run=RUN, task=TASK)
+        self.assertEqual(snapshot['trajectory_id'], 'root')
+        self.assertEqual(snapshot['steps'][0]['message'], 'hello')
+        self.assertEqual(snapshot['extra']['osworld_harness']['run']['execution_status'],
+                         'snapshot')
         self.store.artifact('trajectory.json', trajectory())
         self.assertEqual(len(self.replay.get_trajectory(run=RUN, task=TASK)['steps']), 1)
 
@@ -193,10 +268,57 @@ class ServiceTests(unittest.TestCase):
         projection.add(patch('tool_execution_start', step_id=1, tool_call={
             'tool_call_id':'c','function_name':'bash','arguments':{}}))
         projection.add(patch('tool_execution_end', step_id=1, result={'source_call_id':'c','content':'done'}))
+        projection.add(patch('tool_execution_update', step_id=1, tool_call_id='c',
+                             progress={'content': 'discard me'}))
         records = projection.records()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]['step']['message'], 'new')
         self.assertEqual(records[0]['step']['observation']['results'][0]['source_call_id'], 'c')
+
+    def test_native_compaction_streams_past_aggregate_source_limit(self):
+        ex = self.reader.execution(RUN, TASK)
+        records = [patch('begin_step', step=step())]
+        records.extend(patch('tool_execution_update', step_id=1, tool_call_id='c',
+                             progress={'content': 'x' * 700}) for _ in range(12))
+        chunks = []
+        for index, entry in enumerate(records):
+            body = json.dumps(entry).encode() + b'\n'
+            self.assertLess(len(body), 1024)
+            self.store.artifact(
+                f'trajectory-tail.jsonl.chunks/{index:012d}-{index+1:012d}.jsonl', body)
+            chunks.append({'start': index, 'count': 1})
+        meta = {'trace_format': 'atif-stream', 'stream_schema_version': STREAM_VERSION,
+                'manifest_schema_version': MANIFEST_VERSION, 'total_lines': len(records),
+                'chunks': chunks, 'terminal': False}
+        self.reader.max_object_bytes = 1024
+        compact = self.replay._stream(ex, meta, compact=True)
+        self.assertEqual(len(compact['records']), 1)
+        self.assertEqual(compact['records'][0]['op'], 'append_step')
+
+    def test_overlapping_native_stream_recovers_without_retaining_update_history(self):
+        ex = self.reader.execution(RUN, TASK)
+        begin = patch('begin_step', step=step())
+        updates = [patch('tool_execution_update', step_id=1, tool_call_id='c',
+                         progress={'content': str(index)}) for index in range(20)]
+        records = [begin, *updates]
+        groups = [(0, records[:11]), (10, records[10:])]
+        chunks = []
+        for start, group in groups:
+            end = start + len(group)
+            self.store.artifact(
+                f'trajectory-tail.jsonl.chunks/{start:012d}-{end:012d}.jsonl',
+                b'\n'.join(json.dumps(record).encode() for record in group) + b'\n')
+            chunks.append({'start': start, 'count': len(group)})
+        meta = {'trace_format': 'atif-stream', 'stream_schema_version': STREAM_VERSION,
+                'manifest_schema_version': MANIFEST_VERSION, 'total_lines': len(records),
+                'chunks': chunks, 'terminal': False}
+        compact = self.replay._stream(ex, meta, compact=True)
+        self.assertEqual(len(compact['records']), 1)
+        self.assertEqual(compact['stream']['recovered_duplicate_records'], 1)
+        page = self.replay._stream(ex, meta, after=10, page_bytes=1)
+        self.assertEqual(page['start_line'], 10)
+        self.assertEqual(len(page['records']), 1)
+        self.assertTrue(page['has_more'])
 
     def test_native_window_folds_calls_before_slicing_and_response_limit_is_explicit(self):
         from backend.parsers.replay_view import window_steps
@@ -304,7 +426,10 @@ class InfrastructureTests(unittest.TestCase):
         store=Store(); store.batch(); store.artifact('trajectory.json',trajectory())
         cfg={'access_key_id':'test','access_key_secret':'secret','bucket':'test','endpoint':'https://example.com','region':'region'}
         with tempfile.TemporaryDirectory() as directory, mock_patch('backend.oss_io.client.OssClient',return_value=store):
-            app=create_oss_app(Settings(credentials=cfg,index_path=directory+'/index.sqlite3'))
+            app=create_oss_app(Settings(
+                credentials=cfg, index_path=directory+'/index.sqlite3',
+                aft_path=directory+'/aft.sqlite3',
+            ))
             with TestClient(app) as client:
                 self.assertTrue(client.get('/api/health').json()['services_configured']['catalog'])
                 self.assertEqual(client.get('/api/trajectory',params={'run':RUN,'task':TASK}).status_code,200)

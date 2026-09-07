@@ -117,6 +117,116 @@ def snapshot_updates(trajectory, frames, feed, terminal):
             'stream': {'reset': True, 'source_format': 'normalized-snapshot'}}
 
 
+def materialize_live_trajectory(records, terminal=False):
+    """Fold compact native stream records into an analysis-safe ATIF snapshot."""
+    documents, parents = {}, {}
+
+    def document(identity):
+        if not isinstance(identity, str) or not identity:
+            return None
+        return documents.setdefault(identity, {
+            'id': identity, 'role': 'agent', 'origin': None, 'steps': {},
+        })
+
+    for record in records:
+        if record.get('trace_format') != 'atif-stream' \
+                or record.get('stream_schema_version') != STREAM_VERSION:
+            continue
+        doc = document(record.get('trajectory_id'))
+        op = record.get('op')
+        if op in ('begin_step', 'append_step', 'upsert_step') and doc is not None:
+            step = deepcopy(record.get('step'))
+            if not isinstance(step, dict) or type(step.get('step_id')) is not int:
+                continue
+            doc['steps'][step['step_id']] = step
+            provenance = (step.get('extra', {}).get('osworld_harness', {})
+                          .get('provenance', {}))
+            if isinstance(provenance.get('role'), str):
+                doc['role'] = provenance['role']
+            if isinstance(provenance.get('origin'), str):
+                doc['origin'] = provenance['origin']
+        elif op == 'append_harness_event':
+            event = record.get('event') or {}
+            detail = event.get('record') or {}
+            if event.get('event_type') != 'subagent_lifecycle':
+                continue
+            child, parent = detail.get('id'), detail.get('parentAgentId')
+            if isinstance(child, str) and child and isinstance(parent, str) and parent:
+                parents[child] = {
+                    'parent': parent,
+                    'call_id': detail.get('parentToolCallId'),
+                    'role': detail.get('agent'),
+                }
+
+    complete = {}
+    for identity, doc in documents.items():
+        ordered = [doc['steps'][index] for index in sorted(doc['steps'])]
+        if ordered and all(step.get('step_id') == index
+                           for index, step in enumerate(ordered, 1)):
+            complete[identity] = {**doc, 'steps': ordered}
+    if not complete:
+        return None
+
+    for child, relation in parents.items():
+        parent = complete.get(relation['parent'])
+        if child not in complete or parent is None:
+            continue
+        if isinstance(relation.get('role'), str):
+            complete[child]['role'] = relation['role']
+        call_id = relation.get('call_id')
+        if not isinstance(call_id, str):
+            continue
+        for step in parent['steps']:
+            if not any(call.get('tool_call_id') == call_id
+                       for call in step.get('tool_calls', [])):
+                continue
+            results = step.setdefault('observation', {}).setdefault('results', [])
+            result = next((item for item in results
+                           if item.get('source_call_id') == call_id), None)
+            if result is None:
+                result = {'source_call_id': call_id, 'content': ''}
+                results.append(result)
+            refs = result.setdefault('subagent_trajectory_ref', [])
+            if not any(ref.get('trajectory_id') == child for ref in refs):
+                refs.append({'trajectory_id': child})
+            break
+
+    root_id = next((identity for identity in complete if identity not in parents),
+                   next(iter(complete)))
+
+    def build(identity, ancestors):
+        doc = complete[identity]
+        path = {*ancestors, identity}
+        children = [child for child, relation in parents.items()
+                    if relation['parent'] == identity and child in complete
+                    and child not in path]
+        harness = {'role': doc['role'], 'agent_id': identity}
+        if doc.get('origin'):
+            harness['origin'] = doc['origin']
+        value = {
+            'schema_version': 'ATIF-v1.8', 'trajectory_id': identity,
+            'agent': {'name': 'osworld-stateact', 'version': 'live',
+                      'extra': {'osworld_harness': harness}},
+            'steps': doc['steps'],
+        }
+        if children:
+            value['subagent_trajectories'] = [build(child, path) for child in children]
+        return value
+
+    trajectory = build(root_id, set())
+    trajectory['final_metrics'] = {
+        'total_steps': sum(len(doc['steps']) for doc in complete.values()),
+    }
+    trajectory['extra'] = {'osworld_harness': {
+        'schema_version': 'osworld-harness/v1',
+        'trace_format': 'atif',
+        'source': {'format': 'atif', 'adapter': 'omp-native-live/v1'},
+        'run': {'execution_status': 'terminal' if terminal else 'snapshot',
+                'terminal': bool(terminal)},
+    }}
+    return trajectory
+
+
 def window_steps(trajectory, records, low, high, duration):
     """Window whole semantic steps, folding live tool patches before slicing."""
     steps = {}
@@ -185,7 +295,12 @@ class NativeProjection:
             results[:] = [r for r in results if r.get('source_call_id') != result['source_call_id']] + [result]
         elif op == 'seal_step' and step is not None:
             step.setdefault('extra', {}).setdefault('osworld_harness', {})['timing'] = record.get('timing') or {}
-        elif op not in ('tool_execution_start', 'tool_execution_end', 'seal_step'):
+        # Progress updates are transient and can be extremely repetitive. The
+        # ATIF viewer does not materialize them, and retaining every historical
+        # snapshot makes a compact replay view larger than the source window it
+        # is meant to serve. The terminal result is folded by
+        # tool_execution_end above.
+        elif op not in ('tool_execution_start', 'tool_execution_update', 'tool_execution_end', 'seal_step'):
             self.other.append(record)
 
     def records(self):

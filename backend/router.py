@@ -3,14 +3,15 @@
 from typing import Annotated
 import json
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Body, Query, Response
 from fastapi.responses import JSONResponse
 
 from .catalog import CatalogService
 from .oss_io.client import OssObjectTooLarge, OssProtocolError
 from .queries import (
-    BatchQuery, ExecutionQuery, FrameQuery, LiveQuery, MediaQuery,
-    ModelImageQuery, RunsQuery, TaskRunsQuery, WindowQuery, WorkQuery,
+    BatchQuery, ExecutionAnalysisRequest, ExecutionQuery, FrameQuery, LiveQuery, MediaQuery,
+    LeaderboardQuery, ModelImageQuery, RunsQuery, TaskRunsQuery, WindowQuery, WorkQuery,
+    RunAnalysisRequest,
 )
 from .replay import ReplayService
 from .services import ImageContent, ServiceUnavailable
@@ -42,7 +43,7 @@ def _image_response(image: ImageContent) -> Response:
 
 
 def create_router(catalog: CatalogService | None = None,
-                  replay: ReplayService | None = None) -> APIRouter:
+                  replay: ReplayService | None = None, analysis=None, cohorts=None) -> APIRouter:
     router = APIRouter(prefix="/api", default_response_class=BoundedJSONResponse)
 
     def catalog_service() -> CatalogService:
@@ -55,6 +56,16 @@ def create_router(catalog: CatalogService | None = None,
             raise ServiceUnavailable("replay service is not configured")
         return replay
 
+    def analysis_service():
+        if analysis is None:
+            raise ServiceUnavailable("analysis service is not configured")
+        return analysis
+
+    def cohort_service():
+        if cohorts is None:
+            raise ServiceUnavailable("cohort report service is not configured")
+        return cohorts
+
     # Normal def handlers execute in FastAPI's thread pool, keeping later
     # synchronous OSS/SQLite operations off the event loop. Validate queries
     # before resolving the service so bad requests also fail when unwired.
@@ -62,11 +73,21 @@ def create_router(catalog: CatalogService | None = None,
     def health():
         return {"status": "ok", "services_configured": {
             "catalog": catalog is not None, "replay": replay is not None,
+            "analysis": analysis is not None,
+            "cohorts": cohorts is not None,
         }}
 
     @router.get("/runs", tags=["catalog"])
     def runs(query: Annotated[RunsQuery, Query()]):
         return catalog_service().list_runs(date=query.date)
+
+    @router.get("/leaderboard", tags=["catalog"])
+    def leaderboard(query: Annotated[LeaderboardQuery, Query()]):
+        return catalog_service().leaderboard(**query.model_dump())
+
+    @router.get("/task-stats", tags=["catalog"])
+    def task_stats():
+        return catalog_service().task_stats()
 
     @router.get("/batch", tags=["catalog"])
     def batch(query: Annotated[BatchQuery, Query()]):
@@ -75,6 +96,50 @@ def create_router(catalog: CatalogService | None = None,
     @router.get("/task-runs", tags=["catalog"])
     def task_runs(query: Annotated[TaskRunsQuery, Query()]):
         return catalog_service().list_task_runs(**query.model_dump())
+
+    @router.get("/execution-analysis", tags=["analysis"])
+    def execution_analysis(query: Annotated[ExecutionQuery, Query()]):
+        return analysis_service().state(**query.model_dump())
+
+    @router.get("/analysis-models", tags=["analysis"])
+    def analysis_models():
+        return analysis_service().models()
+
+    @router.post("/execution-analysis", tags=["analysis"], status_code=202)
+    def start_execution_analysis(body: Annotated[ExecutionAnalysisRequest, Body()]):
+        return analysis_service().start(**body.model_dump())
+
+    @router.get("/problem-tags", tags=["analysis"])
+    def problem_tags():
+        return analysis_service().taxonomy()
+
+    @router.get("/run-analysis", tags=["analysis"])
+    def run_analysis(query: Annotated[BatchQuery, Query()]):
+        return analysis_service().run_state(**query.model_dump())
+
+    @router.post("/run-analysis", tags=["analysis"], status_code=202)
+    def start_run_analysis(body: Annotated[RunAnalysisRequest, Body()]):
+        return analysis_service().start_run(**body.model_dump())
+
+    @router.get("/run-analysis-statuses", tags=["analysis"])
+    def run_analysis_statuses():
+        return analysis_service().run_statuses()
+
+    @router.get("/aft-reports", tags=["analysis"])
+    def aft_reports():
+        return analysis_service().reports()
+
+    @router.get("/aft-reports/{report_id}", tags=["analysis"])
+    def aft_report(report_id: str):
+        return analysis_service().report(report_id)
+
+    @router.get("/cohort-reports", tags=["analysis"])
+    def cohort_reports():
+        return cohort_service().list_reports()
+
+    @router.get("/cohort-reports/{report_id}", tags=["analysis"])
+    def cohort_report(report_id: str):
+        return cohort_service().get(report_id)
 
     @router.get("/trajectory", tags=["replay"])
     def trajectory(query: Annotated[ExecutionQuery, Query()]):

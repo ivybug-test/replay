@@ -55,14 +55,29 @@ class CatalogService:
     def get_batch(self, *, run: str, stop=None) -> JsonDocument:
         """Load one batch and enrich attempts with independently reported evaluation."""
         batch = self.reader.batch(run)
+        public_config = self.reader.batch_config(run, optional=True) or {}
         attempts = []
         for task in batch['tasks']:
             if stop and stop.is_set():
                 raise ServiceUnavailable('Index synchronization stopped')
             execution = self.reader.execution(run, task['key'], batch=batch)
             result = self.reader.read_json(execution, 'result.json', optional=True)
-            attempts.append(execution_summary(execution, result))
+            attempts.append(execution_summary(execution, result, public_config=public_config))
         return {**batch, 'tasks': attempts}
+
+    def leaderboard(self, *, date_from: str | None = None, date_to: str | None = None,
+                    include_smoke: bool = False) -> JsonDocument:
+        """Aggregate indexed OSWorld attempts without reading trajectories."""
+        if self.index is None:
+            raise ServiceUnavailable('Execution index is not connected')
+        return self.index.leaderboard(date_from=date_from, date_to=date_to,
+                                      include_smoke=include_smoke)
+
+    def task_stats(self) -> JsonDocument:
+        """Return compact all-time statistics for the Tasks catalog."""
+        if self.index is None:
+            raise ServiceUnavailable('Execution index is not connected')
+        return self.index.task_stats()
 
     def list_task_runs(self, *, task_id: str, cursor: str | None = None, limit: int = 50,
                        model: str | None = None, status: str | None = None) -> JsonDocument:

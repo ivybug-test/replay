@@ -35,7 +35,7 @@ def error_response(status: int, code: str, message: str, **extra) -> JSONRespons
 
 
 def create_app(*, catalog: CatalogService | None = None,
-               replay: ReplayService | None = None) -> FastAPI:
+               replay: ReplayService | None = None, analysis=None, cohorts=None) -> FastAPI:
     app = FastAPI(title="Replay OSS API", version="0.1.0", debug=False,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
                   redirect_slashes=False, responses={
@@ -46,7 +46,7 @@ def create_app(*, catalog: CatalogService | None = None,
                           502: "Upstream error", 503: "Service not ready", 504: "Upstream timeout",
                       }.items()
                   })
-    app.include_router(create_router(catalog, replay))
+    app.include_router(create_router(catalog, replay, analysis, cohorts))
 
     @app.middleware("http")
     async def response_headers(request: Request, call_next):
@@ -105,6 +105,10 @@ def create_oss_app(settings=None) -> FastAPI:
     from contextlib import asynccontextmanager
     from starlette.concurrency import run_in_threadpool
     from .artifacts import ArtifactReader
+    from .aft_store import AftStore
+    from .codex import CodexRunner
+    from .cohort_reports import CohortReportStore
+    from .native_analysis import ExecutionAnalysisService
     from .cache import ReadCache
     from .config import Settings
     from .execution_index import ExecutionIndex
@@ -120,7 +124,14 @@ def create_oss_app(settings=None) -> FastAPI:
     replay = ReplayService(reader, cache=ReadCache(max_bytes=settings.replay_cache_bytes, max_entries=16),
                            concurrency=settings.replay_concurrency)
     sync = IndexSynchronizer(catalog, index, interval=settings.sync_interval)
-    app = create_app(catalog=catalog, replay=replay)
+    analysis = ExecutionAnalysisService(
+        catalog, replay, AftStore(settings.aft_path),
+        CodexRunner(workers=settings.aft_workers),
+        workers=settings.aft_workers,
+        evaluator_source_root=settings.evaluator_source_root,
+    )
+    cohorts = CohortReportStore(settings.aft_path)
+    app = create_app(catalog=catalog, replay=replay, analysis=analysis, cohorts=cohorts)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -129,11 +140,15 @@ def create_oss_app(settings=None) -> FastAPI:
             yield
         finally:
             await run_in_threadpool(sync.stop)
+            analysis.close()
+            cohorts.close()
             index.close()
             reader.cache.clear()
             replay.cache.clear()
             catalog.cache.clear()
 
     app.router.lifespan_context = lifespan
-    app.state.catalog, app.state.replay, app.state.sync = catalog, replay, sync
+    app.state.catalog, app.state.replay, app.state.analysis, app.state.cohorts, app.state.sync = (
+        catalog, replay, analysis, cohorts, sync,
+    )
     return app
