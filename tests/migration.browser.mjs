@@ -17,6 +17,26 @@ try {
   })
   const health = await (await page.request.get(`${base}/api/health`)).json()
   assert.deepEqual(health.services_configured, { catalog: true, replay: true })
+  await page.goto(`${base}/live`)
+  const statusFilter = page.getByLabel('Filter runs by status')
+  await statusFilter.waitFor()
+  await statusFilter.click()
+  const statusOptions = page.getByRole('option')
+  assert.deepEqual(await statusOptions.evaluateAll(options => options.map(option => option.dataset.statusValue)),
+    ['', 'running', 'interrupted', 'completed'])
+  const firstStatus = await page.getByTestId('live-run-card').first().getAttribute('data-run-status')
+  assert.ok(['running', 'interrupted', 'completed'].includes(firstStatus))
+  await page.locator(`[role="option"][data-status-value="${firstStatus}"]`).click()
+  await page.waitForFunction(status => {
+    const cards = [...document.querySelectorAll('[data-testid="live-run-card"]')]
+    return cards.length > 0 && cards.every(card => card.getAttribute('data-run-status') === status)
+  }, firstStatus)
+  assert.equal(new URL(page.url()).searchParams.get('status'), firstStatus)
+  await statusFilter.click()
+  await page.locator('[role="option"][data-status-value=""]').click()
+  await page.waitForFunction(() => !new URL(location.href).searchParams.has('status'))
+  console.log('PASS live catalog status filter')
+
   await page.goto(`${base}/tasks/osworld-v2-003`)
   const history = page.getByTestId('oss-task-runs')
   await history.locator('tbody tr').first().waitFor()
