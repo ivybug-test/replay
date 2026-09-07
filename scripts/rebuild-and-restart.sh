@@ -13,10 +13,17 @@ npm run lint
 VITE_REPLAY_BACKEND_MODE=standalone ./node_modules/.bin/vite build
 
 systemd-analyze --user verify "${UNIT_FILE}" "${PROJECT_ROOT}/deploy/replay-backend-18769.service"
-systemctl --user link --force "${UNIT_FILE}" >/dev/null
+USER_UNIT="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user/${SERVICE}"
+if [[ ! -e "${USER_UNIT}" ]]; then
+  systemctl --user link "${UNIT_FILE}" >/dev/null
+fi
 systemctl --user daemon-reload
 systemctl --user enable replay-backend-18769.service "${SERVICE}" >/dev/null
-systemctl --user restart "${SERVICE}"
+# Codex analysis workers need the same outbound network path as the deploy
+# session. Import only named variables; their values never enter the unit file.
+export REPLAY_EVALUATOR_SOURCE_ROOT="${REPLAY_EVALUATOR_SOURCE_ROOT:-/home/binqiu/OSWorld-V2}"
+systemctl --user import-environment HTTP_PROXY HTTPS_PROXY NO_PROXY CODEX_HOME REPLAY_EVALUATOR_SOURCE_ROOT
+systemctl --user restart replay-backend-18769.service "${SERVICE}"
 
 for _ in $(seq 1 30); do
   if systemctl --user is-active --quiet "${SERVICE}" \

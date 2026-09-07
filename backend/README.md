@@ -130,12 +130,14 @@ backend/
 
 ## HTTP 接口
 
-`GET /api/health` 报告进程可响应、两个 Service 是否注入，不代表 OSS 已连通或
+`GET /api/health` 报告进程可响应、各 Service 是否注入，不代表 OSS 已连通或
 索引同步完成。`/api/docs` 和 `/api/openapi.json` 提供接口和参数定义。
 
 | GET 路径 | 查询参数 |
 |---|---|
 | `/api/runs` | 可选 `date`：YYYY-MM-DD |
+| `/api/leaderboard` | 可选 `date_from`、`date_to`、`include_smoke`；按唯一 task coverage 优先、task 等权平均分其次排名；同一模型同一 task 的多次运行先求均值 |
+| `/api/task-stats` | 官方 OSWorld 2.0 107 个任务的全量 run、评分、通过率与最近执行汇总 |
 | `/api/batch` | `run`；返回 `{ "batch": ... }` |
 | `/api/task-runs` | 三位 `task_id`；可选 `cursor`、`limit`（1–100）、`model`、`status` |
 | `/api/trajectory` | `run`、`task` |
@@ -146,6 +148,38 @@ backend/
 | `/api/frame` | `run`、`task`、`frame` |
 | `/api/model-image` | `run`、`task`、相对 `path`、`sha256` |
 | `/api/atif-media` | `run`、`task`、相对 `path` |
+| `/api/analysis-models` | 返回当前分析后端支持的模型列表和默认模型 |
+| `/api/execution-analysis` | `run`、`task`；读取后端原生 ATIF task 报告与作业状态 |
+| `/api/run-analysis` | `run`；读取整个 run 的 AFT 报告与作业状态 |
+| `/api/run-analysis-statuses` | 返回各 run 最新的 AFT 作业与报告状态 |
+| `/api/aft-reports` | 返回已完成的 run 报告列表 |
+| `/api/aft-reports/{report_id}` | 返回一个完整 run 报告 |
+| `/api/cohort-reports` | 返回最新的独立 cohort 报告列表 |
+| `/api/cohort-reports/{report_id}` | 返回一个不可变 revision 的 cohort 报告 |
+| `/api/problem-tags` | 返回当前版本的 source-grounded taxonomy、规范化定义、映射条件、排除条件与逐节点原文出处 |
+
+`POST /api/execution-analysis` 接受 JSON `{ "run": "...", "task": "...", "model": "...", "force": false }`，
+仅为终态 Execution 幂等地启动或复用分析作业；`POST /api/run-analysis` 接受
+`{ "run": "...", "model": "...", "force": false }`，为终态 run 启动固定的 task-first 分析流程。
+`model` 可省略，值必须来自
+`GET /api/analysis-models`；Run 的 `force=true` 重新聚合并创建可与旧版并存的新 revision，仍复用当前有效的单任务报告；单任务本身需要重跑时使用对应 Execution 的 `force=true`。
+
+分析过程直接读取 ATIF 1.8 core 字段，并从 `subagent_trajectories` 与 `subagent_trajectory_ref`
+确定性重建与 harness 扩展字段解耦的调用链。Task Analyzer 在单个持续 Turn 中主动调用只读工具，生成包含结论、主要问题、调用关系、执行阶段、每个 Turn 和 evaluator 分析的独立报告。
+Run Analyzer 的固定编排先并发处理全部终态 task：当前模型与 pipeline 的已有 task 报告会直接复用，缺失或过期的报告才重新生成；全部 task 处理结束后，第二阶段只能分页读取这些单任务报告，先归纳至少跨两个 task 的共性机制，再读取 taxonomy 做可选映射。后端拒绝虚构 task、虚构单任务问题标题、singleton “共性问题”和不存在的 taxonomy ID。Run 报告固定包含 Task 评分表格与共性问题分析，每个共性问题引用 1–3 个典型 task。
+
+当前 taxonomy 是 `lhht/2026-09-07.1` 的 8 个核心长程 harness 问题节点，来自近六个月论文、活跃项目和权威组织原文的后置聚类；中文与英文规范化标签均明确属于编辑性综合。每个节点保留原始来源、精确章节链接、轨迹映射所需证据和排除条件；HarnessRisk 只支撑持久状态安全与动作授权节点，不用于一般能力、进度或可靠性问题。
+轨迹缺口记录为 `analysis_input_quality`，不算作 Agent 问题。Codex worker 运行在临时目录中，只开放 AFT 动态只读工具和实时网页搜索，关闭
+shell、浏览器自动化、插件和工作区写入。常驻 app-server worker 在调用之间复用，并在整个 run 完成后释放。Task agentic 结果
+按轨迹哈希、模型、pipeline 及 taxonomy 版本缓存。task 与 run 报告、问题证据和 taxonomy 存入
+`REPLAY_AFT_PATH` 指定的 SQLite（默认 `backend/var/aft.sqlite3`）；
+`REPLAY_AFT_WORKERS` 控制共享的 Codex 并发上限。单 Task 2 分钟、整个 Run 15 分钟是性能目标，不是硬性墙钟或失败条件。
+Run 的单任务报告生成受 `REPLAY_AFT_WORKERS` 有界并发控制。Analyzer 会继续到正常完成、App Server 明确报错或收到用户取消；超过性能目标只记录为慢，不会强制终止。
+
+`REPLAY_EVALUATOR_SOURCE_ROOT` 可配置只读的 OSWorld evaluator 源码仓库。AFT 在 episode 结束后按
+`task_id` 加载对应 `evaluation_examples/task_class/task_<id>.py`，并静态提取其引用的通用
+`metrics/getters` 函数，用于分解评分项和定位丢分；源码不会提供给被评判的执行 Agent，也不会写入公开报告。
+Analyzer 不得建议向 Agent 暴露 evaluator、gold、隐藏权重或断言，也不得据此生成针对隐藏实现的优化建议。
 
 `center_ms=-1` 表示结尾；window 默认前 30000 / 后 60000 ms。
 显式跨度须在 5000–120000 ms 内。路径拒绝绝对路径、URL、`.`/`..`、反斜杠和控制

@@ -9,6 +9,7 @@ WorkingDirectory=/home/binqiu/replay-backend-migration
 EnvironmentFile=/home/binqiu/.config/replay-migration/oss.environment
 Environment=REPLAY_INDEX_PATH=/home/binqiu/replay-backend-migration/backend/var/migration.sqlite3
 Environment=REPLAY_SYNC_INTERVAL=120
+Environment=REPLAY_EVALUATOR_SOURCE_ROOT=/home/binqiu/OSWorld-V2
 ExecStart=/home/binqiu/replay-backend-migration/backend/.venv/bin/python -m uvicorn backend.app:create_oss_app --factory --host 127.0.0.1 --port 18769 --limit-concurrency 16 --no-access-log
 Restart=on-failure
 RestartSec=5s

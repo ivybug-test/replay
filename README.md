@@ -2,15 +2,15 @@
 
 Replay is a new agent-trajectory workbench derived from ATIF Trajectory Viewer.
 It keeps the upstream task browser, film-style trajectory view, upload flow,
-specialized renderers and AFT panels, and adds a live integration with the
-existing OSS Replay backend in `/home/binqiu/oss-replay`.
+specialized renderers and AFT panels, and includes its own OSS-backed Replay API
+and native ATIF 1.8 analysis pipeline.
 
-This branch runs the standalone OSS backend migration in the independent worktree
-`/home/binqiu/replay-backend-migration`. Test it at
-[task 003](http://47.120.53.174:18770/tasks/osworld-v2-003) or
-[Live runs](http://47.120.53.174:18770/live). See
-[deployment notes](./deploy/README-migration.md) and [backend documentation](./backend/README.md).
-The original services on ports 18768/18767 remain running.
+The production UI is available on port 18768; its `/api` requests are served by
+the standalone backend on localhost port 18769. Start with
+[Overview](http://47.120.53.174:18768/overview),
+[Live runs](http://47.120.53.174:18768/live), or
+[AFT reports](http://47.120.53.174:18768/aft-reports). See
+[backend documentation](./backend/README.md) for storage, APIs, and analysis behavior.
 
 The first migration slice is available at `/live`: it lists real OSS runs,
 opens their tasks, loads the complete semantic Agent Work sequence, and shows
@@ -21,7 +21,7 @@ npm install
 npm run dev          # http://127.0.0.1:5174/live
 ```
 
-The Vite development server proxies `/api` to `http://127.0.0.1:18767`. Set
+The Vite development server proxies `/api` to `http://127.0.0.1:18769`. Set
 `REPLAY_BACKEND_URL` to use another backend. See [MIGRATION.md](./MIGRATION.md)
 for the capability map and migration order.
 
@@ -51,9 +51,10 @@ and other execution metrics are no longer displayed.
 The Steps sidebar defaults to **By agent** for attributed trajectories. Agent
 branches follow ATIF parent/child trajectories and tool-result delegation
 references; the parent-step link jumps to the dispatch. Expand all / Collapse all
-show or hide each agent's own steps while keeping every agent header and the
-delegation hierarchy visible. Child agents can expand independently of folded
-parents. The entire sidebar can also be hidden.
+show the whole tree or keep top-level agent steps visible with each direct child
+represented by a folded header. Expanding a child reveals only that agent's own
+steps and its direct child headers; deeper descendants stay folded. Direct jumps
+to a nested step reveal only its ancestor path. The entire sidebar can also be hidden.
 **Chronological** restores the flat time-ordered list without changing step
 numbers or playback. Live polls preserve manual folds; selecting a different
 step through playback, State or another panel reveals only that agent's steps.
