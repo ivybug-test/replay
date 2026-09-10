@@ -36,16 +36,17 @@ OSS 配置：`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_BUCKET`、
 代理）与 `replay-backend-18769.service`（本后端）。`npm run deploy`
 （`scripts/rebuild-and-restart.sh`）构建前端并安装、重启两个单元。
 
-- 单元文件在 `deploy/`，由部署脚本从它所在的工作树安装。因此
-  `replay-backend-18769.service` 必须指向承载本后端的树（`/home/binqiu/replay`）：
-  其他工作树可能缺少分析模块，切过去会让 `/api/execution-analysis`、
-  `/api/aft-reports`、`/api/cohort-reports` 消失。
-- OSS 凭据通过 `EnvironmentFile=/home/binqiu/.config/replay-migration/oss.environment`
-  提供：mode 0600，只含六个 `OSS_*` 值，从既有的授权配置整理而来，不含模型或
-  VM 管理凭据，不要提交。
+- 单元文件在 `deploy/`，由部署脚本从它所在的工作树安装。单元里用 systemd 的 `%h`
+  （服务用户的家目录）而非写死某个用户名，因此任何位于 `~/replay` 的 checkout 都能直接
+  使用：`replay-backend-18769.service` 必须指向承载本后端的树，指到其他工作树（可能缺少
+  分析模块）会让 `/api/execution-analysis`、`/api/aft-reports`、`/api/cohort-reports` 消失。
+- OSS 凭据通过 `EnvironmentFile=%h/.config/replay-migration/oss.environment` 提供
+  （即 `~/.config/replay-migration/oss.environment`）：mode 0600，只含六个 `OSS_*` 值，
+  从既有的授权配置整理而来，不含模型或 VM 管理凭据，不要提交。
 - 索引 `backend/var/executions.sqlite3`（可重建，绑定 bucket/endpoint/prefix），
-  扫描间隔 120 秒；`REPLAY_EVALUATOR_SOURCE_ROOT=/home/binqiu/OSWorld-V2` 同时写进
-  单元与环境导入，手动重启不会丢失 evaluator 上下文。
+  扫描间隔 120 秒；evaluator 源码目录由 `REPLAY_EVALUATOR_SOURCE_ROOT` 指定
+  （单元里为 `%h/OSWorld-V2`，部署脚本默认 `~/OSWorld-V2` 并可由调用方覆盖），
+  同时写进单元与环境导入，手动重启不会丢失 evaluator 上下文。
 - 旧 `oss-replay` 服务（18767）仍在运行，但 Replay 不再调用它。主机内存守护通过
   `~/.config/systemd/user/replay-memory-guard.service.d/migration.conf` 覆盖
   `replay-18768`、`oss-replay-18767`、`replay-backend-18769` 三个单元，见

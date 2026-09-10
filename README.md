@@ -126,7 +126,7 @@ The Tasks page includes a separate `public/osworld-v2.dataset.json` catalog,
 merged with the original examples. Rebuild it from a local OSWorld-V2 checkout:
 
 ```bash
-/home/binqiu/OSWorld-V2/.venv/bin/python3 scripts/import_osworld.py --root /home/binqiu/OSWorld-V2
+python3 scripts/import_osworld.py --root ~/OSWorld-V2
 npm run deploy
 ```
 

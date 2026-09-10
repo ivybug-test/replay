@@ -5,8 +5,8 @@ Wants=network-online.target replay-backend-18769.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/binqiu/replay-backend-migration
-ExecStart=/usr/bin/node /home/binqiu/replay-backend-migration/server.mjs
+WorkingDirectory=%h/replay-backend-migration
+ExecStart=/usr/bin/node %h/replay-backend-migration/server.mjs
 Environment=NODE_ENV=production
 Environment=REPLAY_HOST=0.0.0.0
 Environment=REPLAY_PORT=18770

@@ -27,7 +27,8 @@ systemctl --user daemon-reload
 systemctl --user enable replay-backend-18769.service "${SERVICE}" >/dev/null
 # Codex analysis workers need the same outbound network path as the deploy
 # session. Import only named variables; their values never enter the unit file.
-export REPLAY_EVALUATOR_SOURCE_ROOT="${REPLAY_EVALUATOR_SOURCE_ROOT:-/home/binqiu/OSWorld-V2}"
+# The evaluator checkout defaults to ~/OSWorld-V2, overridable from the caller.
+export REPLAY_EVALUATOR_SOURCE_ROOT="${REPLAY_EVALUATOR_SOURCE_ROOT:-${HOME}/OSWorld-V2}"
 systemctl --user import-environment HTTP_PROXY HTTPS_PROXY NO_PROXY CODEX_HOME REPLAY_EVALUATOR_SOURCE_ROOT
 systemctl --user restart replay-backend-18769.service "${SERVICE}"
 

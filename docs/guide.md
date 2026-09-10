@@ -334,7 +334,7 @@ AFT 链路：面板 `GET /api/execution-analysis` 读状态 → 无报告时可 
 | 文件 | 作用 |
 |---|---|
 | `replay-18768.service` | 生产前端：`node server.mjs`，`REPLAY_HOST=0.0.0.0`、`REPLAY_PORT=18768`、`REPLAY_BACKEND_URL=http://127.0.0.1:18769`，内存上限 384M/512M |
-| `replay-backend-18769.service` | 后端：`uvicorn backend.app:create_oss_app`，`WorkingDirectory=/home/binqiu/replay`、索引 `backend/var/executions.sqlite3`、`REPLAY_SYNC_INTERVAL=120`、`REPLAY_EVALUATOR_SOURCE_ROOT`，内存上限 1.5G/2G。**该单元名被两个工作树共用**：部署脚本安装自己所在工作树的副本，指到缺少分析模块的树会让 `/api/execution-analysis`、`/api/aft-reports`、`/api/cohort-reports` 消失 |
+| `replay-backend-18769.service` | 后端：`uvicorn backend.app:create_oss_app`，工作目录 `%h/replay`、索引 `backend/var/executions.sqlite3`、`REPLAY_SYNC_INTERVAL=120`、`REPLAY_EVALUATOR_SOURCE_ROOT=%h/OSWorld-V2`，内存上限 1.5G/2G。单元用 `%h`（服务用户家目录）而不是写死用户名，所以任何位于 `~/replay` 的 checkout 都适用。**该单元名被两个工作树共用**：部署脚本安装自己所在工作树的副本，指到缺少分析模块的树会让 `/api/execution-analysis`、`/api/aft-reports`、`/api/cohort-reports` 消失 |
 | `replay-migration-18770.service` | 已退役的迁移测试前端（停止并禁用），保留作参考 |
 | `replay-memory-guard.py` + `replay-memory-guard.service` + `replay-memory-guard.timer` | 主机内存守护：每 5 秒采样，≥80% 停掉 `REPLAY_GUARD_UNITS`（本机经 drop-in 覆盖为 18768 + 18767 + 18769），低于 75% 持续 60 秒才恢复，≥85% 额外打 critical |
 | `test_memory_guard.py` | 守护决策函数的单元测试 |
@@ -399,9 +399,11 @@ npm run deploy         # 构建 + 安装/重启 systemd 单元（18768 与 18769
 | 18769 | 本仓库后端（只监听 127.0.0.1） |
 | 18767 | 旧 `oss-replay` 服务，仍在运行，Replay 不再使用它 |
 
-部署要点：`deploy/replay-backend-18769.service` 必须指向承载后端的树
-（`/home/binqiu/replay`）；凭据来自 `EnvironmentFile=/home/binqiu/.config/replay-migration/oss.environment`；
-索引 `backend/var/executions.sqlite3` 可重建。改后端资源上限需要
+部署要点：单元里的路径都用 systemd 的 `%h`（服务用户家目录），因此
+`deploy/replay-backend-18769.service` 指向的是 `%h/replay`——承载后端的那个 checkout，
+指到缺少分析模块的树会让分析接口消失；OSS 凭据来自
+`EnvironmentFile=%h/.config/replay-migration/oss.environment`；索引
+`backend/var/executions.sqlite3` 可重建。改后端资源上限需要
 `systemctl --user restart replay-backend-18769.service`；仅改前端不需要重启后端。
 完整运维说明见 [backend/README.md](../backend/README.md) 的「部署与运维」。
 

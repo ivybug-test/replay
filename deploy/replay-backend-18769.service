@@ -8,17 +8,18 @@ Type=simple
 # Both deploy scripts install this unit, so it must point at the tree it is
 # deployed from: the migration worktree predates the analysis modules and cannot
 # serve /api/execution-analysis, /api/aft-reports or /api/cohort-reports.
-WorkingDirectory=/home/binqiu/replay
-EnvironmentFile=/home/binqiu/.config/replay-migration/oss.environment
+# %h is the service user's home, so no user path is hardcoded here.
+WorkingDirectory=%h/replay
+EnvironmentFile=%h/.config/replay-migration/oss.environment
 # The execution index is a rebuildable cache. Keep it beside the code that owns
 # it instead of inside another worktree; the first start after this change
 # rescans OSS and reports `syncing` until it is ready.
-Environment=REPLAY_INDEX_PATH=/home/binqiu/replay/backend/var/executions.sqlite3
+Environment=REPLAY_INDEX_PATH=%h/replay/backend/var/executions.sqlite3
 Environment=REPLAY_SYNC_INTERVAL=120
 # Also imported into the user manager by the deploy scripts; setting it here
 # keeps a manual `systemctl --user restart` from dropping the evaluator context.
-Environment=REPLAY_EVALUATOR_SOURCE_ROOT=/home/binqiu/OSWorld-V2
-ExecStart=/home/binqiu/replay/backend/.venv/bin/python -m uvicorn backend.app:create_oss_app --factory --host 127.0.0.1 --port 18769 --limit-concurrency 16 --no-access-log
+Environment=REPLAY_EVALUATOR_SOURCE_ROOT=%h/OSWorld-V2
+ExecStart=%h/replay/backend/.venv/bin/python -m uvicorn backend.app:create_oss_app --factory --host 127.0.0.1 --port 18769 --limit-concurrency 16 --no-access-log
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=45s
