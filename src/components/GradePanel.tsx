@@ -16,10 +16,13 @@ export default function GradePanel({
   grade,
   failureReason,
   verifierLog,
+  passed: passedVerdict,
 }: {
   grade?: Grade | null
   failureReason?: string | null
   verifierLog?: string | null
+  /** The run's own pass verdict; only re-derived here when a vendor omits it. */
+  passed?: boolean | null
 }) {
   if (!grade) {
     return (
@@ -34,7 +37,8 @@ export default function GradePanel({
 
   const score = grade.score ?? 0
   const max = grade.maxScore ?? 1
-  const passed = grade.gate ? Object.values(grade.gate).every((v) => v !== false) : score / max >= 0.999
+  const passed = passedVerdict
+    ?? (grade.gate ? Object.values(grade.gate).every((v) => v !== false) : score / max >= 0.999)
 
   return (
     <div className="space-y-4">

@@ -19,7 +19,6 @@ class Settings:
     object_bytes: int = 64 * 1024 * 1024
     read_cache_bytes: int = 32 * 1024 * 1024
     replay_cache_bytes: int = 64 * 1024 * 1024
-    analysis_url: str = 'http://127.0.0.1:18767'
     aft_path: str = str(Path(__file__).parent / 'var' / 'aft.sqlite3')
     aft_workers: int = 20
     evaluator_source_root: str | None = None
@@ -51,7 +50,6 @@ class Settings:
             object_bytes=integer('REPLAY_OBJECT_MIB', 64, maximum=128) * 1024 * 1024,
             read_cache_bytes=integer('REPLAY_READ_CACHE_MIB', 32) * 1024 * 1024,
             replay_cache_bytes=integer('REPLAY_CACHE_MIB', 64) * 1024 * 1024,
-            analysis_url=env.get('REPLAY_ANALYSIS_URL', cls.analysis_url).rstrip('/'),
             aft_path=env.get('REPLAY_AFT_PATH') or cls.aft_path,
             aft_workers=integer('REPLAY_AFT_WORKERS', 20, maximum=24),
             evaluator_source_root=env.get('REPLAY_EVALUATOR_SOURCE_ROOT') or None,

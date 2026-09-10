@@ -7,10 +7,10 @@ from unittest.mock import Mock
 
 from backend.aft_store import AftStore
 from backend.native_analysis import (
-    PIPELINE_VERSION, RUN_ANALYSIS_TARGET_SECONDS, RUN_PIPELINE_VERSION,
+    JOB_PHASES, PIPELINE_VERSION, RUN_ANALYSIS_TARGET_SECONDS, RUN_PIPELINE_VERSION,
     TASK_ANALYSIS_TARGET_SECONDS,
     ExecutionAnalysisService, _agentic_tools,
-    _canonical_turn_id, _retryable_codex_error, _validate_task_synthesis,
+    _canonical_turn_id, _progress, _retryable_codex_error, _validate_task_synthesis,
 )
 from backend.codex import CodexError
 from backend.services import InvalidQuery, ResourceNotFound
@@ -103,6 +103,17 @@ class ExecutionAnalysisTests(unittest.TestCase):
         self.assertTrue(_retryable_codex_error(
             CodexError('Codex analysis did not return valid JSON'),
         ))
+
+    def test_invalid_evidence_references_are_retryable(self):
+        for message in (
+            'Codex analysis referenced 1 unknown Turn ids',
+            'Codex analysis referenced an unknown Agent trajectory',
+        ):
+            with self.subTest(message=message):
+                self.assertTrue(_retryable_codex_error(CodexError(message)))
+        self.assertFalse(_retryable_codex_error(CodexError(
+            'Codex thread/start failed: failed to load configuration',
+        )))
 
     def test_task_analysis_tools_expose_independent_evidence_without_ordering(self):
         turns = [{
@@ -320,6 +331,81 @@ class ExecutionAnalysisTests(unittest.TestCase):
                          'responsibility': 'model', 'mapping_status': 'unmapped'}]},
         )
         self.assertEqual(second['revision'], report['revision'] + 1)
+
+    def test_job_payload_publishes_terminal_status_and_phase_label(self):
+        job = {'job_id': 'j1', 'status': 'running', 'model': 'gpt-a',
+               'progress': {'phase': 'evidence-collection', 'completed': 0, 'total': 1}}
+        value = ExecutionAnalysisService._public_job(job)
+        self.assertFalse(value['terminal'])
+        self.assertEqual(value['phase'], 'evidence-collection')
+        self.assertEqual(value['phase_label'], 'Agentic 取证')
+        # A job without a phase yet reports its status, with the status label.
+        stopped = ExecutionAnalysisService._public_job({**job, 'status': 'failed', 'progress': {}})
+        self.assertTrue(stopped['terminal'])
+        self.assertEqual(stopped['phase_label'], '分析失败')
+        self.assertIsNone(ExecutionAnalysisService._public_job(None))
+
+    def test_progress_rejects_a_phase_outside_the_published_vocabulary(self):
+        self.assertEqual(set(JOB_PHASES), {
+            'queued', 'preparing', 'evidence-collection', 'finalizing-report',
+            'task-analysis', 'common-problem-synthesis', 'completed', 'failed', 'cancelled',
+        })
+        with self.assertRaises(ValueError):
+            _progress('turn-analysis', completed=0)
+
+    def test_models_publish_product_visibility(self):
+        self.service.codex.models = lambda: {'models': [
+            {'id': 'gpt-6.1', 'model': 'gpt-6.1', 'displayName': 'GPT 6.1',
+             'description': '', 'isDefault': True},
+            {'id': 'gpt-60', 'model': 'gpt-60', 'displayName': 'GPT 60',
+             'description': '', 'isDefault': False},
+        ]}
+        hidden = {item['model']: item['hidden'] for item in self.service.models()['models']}
+        self.assertEqual(hidden, {'gpt-6.1': True, 'gpt-60': False})
+        # Hidden entries stay selectable by name so an old report can be re-analysed.
+        self.assertEqual(self.service._validate_model('gpt-6.1'), 'gpt-6.1')
+
+    def test_reports_publish_freshness_instead_of_assuming_current(self):
+        self.store.save_task_report('run-1', '0001-003', 'gpt-a', 'digest', '# current',
+                                    {'pipeline_version': PIPELINE_VERSION, 'issues': []})
+        state = self.service.state(run='run-1', task='0001-003')
+        self.assertTrue(state['report']['current'])
+        self.assertEqual(state['report']['pipeline_version'], PIPELINE_VERSION)
+        self.store.save_task_report('run-1', '0001-003', 'gpt-a', 'digest', '# older pipeline',
+                                    {'pipeline_version': 'task-execution-analysis/2.0.0',
+                                     'issues': []})
+        self.assertFalse(self.service.state(run='run-1', task='0001-003')['report']['current'])
+        # Freshness is judged for the model that produced the report; whether a
+        # report satisfies a newly requested model is `start`'s question.
+        self.store.save_task_report('run-1', '0001-003', 'gpt-b', 'digest', '# other model',
+                                    {'pipeline_version': PIPELINE_VERSION, 'issues': []})
+        self.assertTrue(self.service.state(run='run-1', task='0001-003')['report']['current'])
+        # A task without a stored report publishes no freshness at all.
+        self.assertIsNone(self.service.state(run='run-2', task='0001-003')['report'])
+        with self.assertRaises(ResourceNotFound):
+            self.service.state(run='run-1', task='0002-003')
+
+    def test_run_report_listings_publish_freshness(self):
+        task = self.store.save_task_report('run-1', '0001-003', 'gpt-a', 'digest', '# task',
+                                           {'pipeline_version': PIPELINE_VERSION, 'issues': []})
+        self.store.save_run_report('run-1', 'gpt-a', '# run', {
+            'schema_version': 'aft-run-report/v2', 'issues': [],
+            'tasks': [{'task_key': '0001-003', 'task_report_id': task['report_id']}],
+            'pipeline_version': RUN_PIPELINE_VERSION,
+        })
+        listed = self.service.reports()['reports'][0]
+        self.assertTrue(listed['current'])
+        self.assertTrue(self.service.run_statuses()['runs']['run-1']['report']['current'])
+        self.assertTrue(self.service.run_state(run='run-1')['report']['current'])
+        # An older pipeline version is published as stale rather than rendered
+        # as an unconditional success.
+        self.store.save_run_report('run-1', 'gpt-a', '# old', {
+            'schema_version': 'aft-run-report/v2', 'issues': [],
+            'tasks': [{'task_key': '0001-003', 'task_report_id': task['report_id']}],
+            'pipeline_version': 'run-task-first-analysis/0.9.0',
+        })
+        self.assertFalse(self.service.reports()['reports'][0]['current'])
+        self.assertFalse(self.service.run_state(run='run-1')['report']['current'])
 
     def test_start_validates_terminal_model_and_schedules_once(self):
         self.service._execution_summary = Mock(return_value=({'status': 'succeeded'}, {}, {}))

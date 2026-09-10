@@ -1,3 +1,4 @@
+import './hoh-state.test'
 import { observerEvents, plannerEvents } from '../src/lib/observerFeed'
 import ExecutionStatePanel from '../src/components/ExecutionStatePanel'
 import assert from 'node:assert/strict'
@@ -5,7 +6,6 @@ import { test } from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { atifTrajectoryToSteps } from '../src/lib/atifToViewer'
 import { atifLiveToTrajectory, mergeAtifLiveSnapshot } from '../src/lib/atifLive'
-import { legacyTraceToAtif } from '../src/lib/legacyTraceToAtif'
 import { buildStepTree } from '../src/lib/stepTree'
 import StepTimeline, { formatContextSize } from '../src/components/StepTimeline'
 import type { AtifTrajectory, AtifStep } from '../src/lib/atif'
@@ -14,6 +14,8 @@ import { formatJsonForDisplay, formatObservationForDisplay } from '../src/lib/fo
 import Markdown from '../src/components/Markdown'
 import { stepIndexForTurn } from '../src/lib/stepNavigation'
 import { uniqueSortedTurnEvidence } from '../src/lib/analysisEvidence'
+import { isActiveJob, isStaleReport, isTerminalJob, jobPhaseLabel } from '../src/lib/analysisJobs'
+import type { ExecutionStateFeed } from '../src/lib/ossReplay'
 
 const step = (id: number, ms: number, message: string): AtifStep => ({
   step_id: id, source: 'agent', message,
@@ -127,20 +129,36 @@ test('nested agents with the same role remain distinct and missing call links do
   assert.equal(steps[1].agent?.delegationStepIndex, undefined)
 })
 
-test('legacy model inputs and messages share their real role, without guessed parent edges', () => {
-  const work = { terminal: true, duration_ms: 1000, agents: [], items: [{
-    id: 'work-1', agent_id: 'worker', label: 'GUI', role: 'gui_worker', origin: 'computer',
-    start_ms: 100, thinking_ms: 0, ongoing: false, global_turn_num: 7, tools: [], details: [],
-    model_inputs: [{ request_index: 1, new_images: [{ path: 'image.png', sha256: 'image' }] }],
-    message: { role: 'assistant' as const, blocks: [{ type: 'text', text: 'Done' }] },
-  }] }
-  const input = legacyTraceToAtif(work, { sessionId: 's', trajectoryId: 'root', agentName: 'legacy', imageUrl: () => 'https://example.test/image.png' })
-  const steps = atifTrajectoryToSteps(input)
+test('harness provenance and message images reach native ATIF viewer steps', () => {
+  const harnessStep = (
+    id: number, source: 'user' | 'agent', message: unknown, provenance: Record<string, unknown>,
+  ) => ({
+    step_id: id, source, message,
+    extra: { osworld_harness: { provenance, timing: { start_ms: id * 1000, end_ms: id * 1000 + 100 } } },
+  })
+  const trajectory = {
+    schema_version: 'ATIF-v1.8', trajectory_id: 'root', session_id: 's',
+    agent: { name: 'omp', version: '1' },
+    steps: [
+      harnessStep(1, 'user', [{ type: 'image', source: { path: 'shots/1.png', media_type: 'image/png' } }],
+        { agent_id: 'worker', role: 'gui_worker' }),
+      harnessStep(2, 'agent', 'Done', { agent_id: 'worker', role: 'gui_worker', global_turn_num: 7 }),
+    ],
+  }
+  const steps = atifTrajectoryToSteps(trajectory, {
+    resolveImage: (source) => `https://example.test/${source.path}`,
+  })
   assert.equal(steps.length, 2)
+  // The producing agent is identified by its harness provenance, and a flat
+  // document must not invent a delegation edge between adjacent steps.
   assert.deepEqual(steps.map(s => s.agent?.id), ['worker', 'worker'])
   assert.deepEqual(steps.map(s => s.agent?.role), ['gui_worker', 'gui_worker'])
-  assert.equal(steps[1].turn, 7)
   assert.equal(steps[1].agent?.parentId, undefined)
+  assert.equal(steps[1].turn, 7)
+  // An image in the message becomes an input attachment on that step.
+  assert.equal(steps[0].images?.[0]?.url, 'https://example.test/shots/1.png')
+  assert.equal(steps[0].images?.[0]?.kind, 'input')
+  assert.equal(steps[0].images?.[0]?.mimeType, 'image/png')
 })
 
 test('analysis Turn links resolve to the matching Agent step before timestamp fallback', () => {
@@ -183,6 +201,37 @@ test('live lifecycle becomes the same delegation tree as an archive', () => {
   assert.equal(steps[1].agent?.parentId, 'main-id')
   assert.equal(steps[1].agent?.label, 'gui_worker')
   assert.equal(steps[1].agent?.delegationStepIndex, 0)
+})
+
+test('live scheduler ancestors retain sibling stages across incremental compacted polls', () => {
+  const patch = (value: Record<string, unknown>) => ({ trace_format: 'atif-stream', stream_schema_version: 'osworld-atif-stream/v1', ...value })
+  let snapshot: ReturnType<typeof mergeAtifLiveSnapshot> | undefined
+  for (const [index, role] of ['planner', 'executor', 'verifier'].entries()) {
+    const records = [
+      patch({ op: 'append_harness_event', event: { event_type: 'subagent_lifecycle', record: {
+        id: role, agent: role, parentAgentId: 'scheduler', parentRole: 'orchestrator',
+      } } }),
+      patch({ trajectory_id: role, op: 'upsert_step', step: {
+        ...step(1, index * 100, role),
+        extra: { osworld_harness: { timing: { start_ms: index * 100 }, provenance: { role } } },
+      } }),
+    ]
+    snapshot = mergeAtifLiveSnapshot(snapshot, {
+      trace_format: 'atif-stream', stream_schema_version: 'osworld-atif-stream/v1',
+      start_line: index * 2, total_lines: (index + 1) * 2, terminal: false, records,
+    })
+    const trajectory = atifLiveToTrajectory(snapshot.stream)!
+    assert.equal(trajectory.trajectory_id, 'scheduler')
+    assert.deepEqual(trajectory.subagent_trajectories?.map(child => child.trajectory_id),
+      ['planner', 'executor', 'verifier'].slice(0, index + 1))
+    assert.equal(trajectory.steps[0].source, 'system')
+    assert.equal(trajectory.steps[0].llm_call_count, 0)
+    assert.equal(trajectory.steps[0].extra?.osworld_harness.provenance.model_visible, false)
+    const stages = atifTrajectoryToSteps(trajectory).filter(item => item.role === 'agent')
+    assert.deepEqual(stages.map(item => item.text), ['planner', 'executor', 'verifier'].slice(0, index + 1))
+    assert.ok(stages.every(item => item.agent?.parentId === 'scheduler' && item.agent.delegationStepIndex == null))
+    assert.equal(buildStepTree(atifTrajectoryToSteps(trajectory))[0].children.length, index + 1)
+  }
 })
 
 test('unattributed old datasets remain navigable; orphan/cyclic parents cannot hide steps', () => {
@@ -284,7 +333,33 @@ test('live Observer patches project to the same panel feed and empty old runs sh
     patch({ op: 'append_harness_event', event: { sequence: 20, episode_elapsed_ms: 600, event_type: 'observer_interval', record: { record: { interval_id: 1, model_turns: 5, status: 'completed', description: '已找到窗口。' } } } }),
   ] })!
   assert.equal(observerEvents(trajectory)[0].record?.description, '已找到窗口。')
-  const html = renderToStaticMarkup(<ExecutionStatePanel feed={{ version: 'old', counts: { goal: 1 }, events: [{ event: 'execution_state_goal', sequence: 1, episode_elapsed_ms: 0, record: { statement: 'legacy goal' } }], terminal: true, duration_ms: 0 }} playheadMs={0} onJump={() => {}} />)
+  // A legacy execution-state/v1 feed is not one of the panel's inputs: it must
+  // render nothing rather than pretending to be Planner or Observer state.
+  const legacyFeed = { version: 'old', counts: { goal: 1 }, events: [{ event: 'execution_state_goal', sequence: 1, episode_elapsed_ms: 0, record: { statement: 'legacy goal' } }], terminal: true, duration_ms: 0 } as unknown as ExecutionStateFeed
+  const html = renderToStaticMarkup(<ExecutionStatePanel feed={legacyFeed} playheadMs={0} onJump={() => {}} />)
   assert.match(html, /No Planner or Observer state recorded/)
   assert.doesNotMatch(html, /legacy goal|Goals/)
+})
+
+test('analysis job vocabulary comes from the backend and falls back for older backends', () => {
+  // Published verdict wins over the status name: a cancelled job is terminal
+  // even though the local fallback set is what older backends rely on.
+  assert.equal(isTerminalJob({ job_id: 'j', status: 'cancelled' }), true)
+  assert.equal(isTerminalJob({ job_id: 'j', status: 'running' }), false)
+  assert.equal(isTerminalJob({ job_id: 'j', status: 'synthesizing', terminal: true }), true)
+  assert.equal(isTerminalJob({ job_id: 'j', status: 'completed', terminal: false }), false)
+  assert.equal(isTerminalJob(null), true)
+  assert.equal(isActiveJob({ job_id: 'j', status: 'synthesizing' }), true)
+  assert.equal(isActiveJob({ job_id: 'j', status: 'completed_partial' }), false)
+  assert.equal(jobPhaseLabel({ job_id: 'j', status: 'running', progress: { phase: 'evidence-collection' } }), 'evidence-collection')
+  assert.equal(jobPhaseLabel({ job_id: 'j', status: 'running', phase: 'preparing', phase_label: '准备轨迹' }), '准备轨迹')
+  assert.equal(jobPhaseLabel(null, '排队中'), '排队中')
+})
+
+test('report freshness is tri-state and never invents staleness', () => {
+  assert.equal(isStaleReport({ current: false }), true)
+  assert.equal(isStaleReport({ current: true }), false)
+  assert.equal(isStaleReport({}), false)
+  assert.equal(isStaleReport({ current: null }), false)
+  assert.equal(isStaleReport(null), false)
 })

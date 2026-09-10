@@ -4,8 +4,9 @@
 产物定位、缓存、执行索引、后台同步和轨迹解析。后端只读 OSS；任务说明、能力标签、
 难度仍由前端维护。运行时不依赖 harness 或旧 oss-replay 的代码目录。
 
-迁移测试版已在独立 worktree 和公网端口 18770 接入本后端，详见
-`deploy/README-migration.md`。原有 18768 服务保持原来的连接。后端监听本机 18769。
+本后端服务 18768 生产前端的 `/api`（18770 迁移测试前端已停止并从单元中禁用）。
+前端 Node 进程不持有 OSS 凭据，所有 `/api` 请求（含 `/api/atif-live`）都转发到此
+服务。后端监听本机 18769。
 Python 3.10+；OSS、索引和解析层使用标准库，HTTP 层使用 FastAPI/Pydantic/Uvicorn。
 
 ## 启动
@@ -29,6 +30,31 @@ OSS 配置：`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_BUCKET`、
 一致，为河源内网 HTTPS 地址和 `cn-heyuan`；根目录为 `<OSS_PREFIX>/harness/`。
 不回退到 VM 控制使用的 `ALIYUN_*` 凭据。
 
+## 部署与运维
+
+生产环境由两个用户 systemd 单元组成：`replay-18768.service`（Node 静态托管 + `/api`
+代理）与 `replay-backend-18769.service`（本后端）。`npm run deploy`
+（`scripts/rebuild-and-restart.sh`）构建前端并安装、重启两个单元。
+
+- 单元文件在 `deploy/`，由部署脚本从它所在的工作树安装。因此
+  `replay-backend-18769.service` 必须指向承载本后端的树（`/home/binqiu/replay`）：
+  其他工作树可能缺少分析模块，切过去会让 `/api/execution-analysis`、
+  `/api/aft-reports`、`/api/cohort-reports` 消失。
+- OSS 凭据通过 `EnvironmentFile=/home/binqiu/.config/replay-migration/oss.environment`
+  提供：mode 0600，只含六个 `OSS_*` 值，从既有的授权配置整理而来，不含模型或
+  VM 管理凭据，不要提交。
+- 索引 `backend/var/executions.sqlite3`（可重建，绑定 bucket/endpoint/prefix），
+  扫描间隔 120 秒；`REPLAY_EVALUATOR_SOURCE_ROOT=/home/binqiu/OSWorld-V2` 同时写进
+  单元与环境导入，手动重启不会丢失 evaluator 上下文。
+- 旧 `oss-replay` 服务（18767）仍在运行，但 Replay 不再调用它。主机内存守护通过
+  `~/.config/systemd/user/replay-memory-guard.service.d/migration.conf` 覆盖
+  `replay-18768`、`oss-replay-18767`、`replay-backend-18769` 三个单元，见
+  `deploy/README-memory-guard.md`。
+- 待清理：已停止的迁移测试前端（18770）留下一条 TCP 18770 安全组入站规则；它的
+  单元文件与 `dist-migration/` 也可以删除。
+
+## 环境变量
+
 | 环境变量 | 默认值 | 含义 |
 |---|---|---|
 | `REPLAY_INDEX_PATH` | `backend/var/executions.sqlite3` | 可重建的执行摘要索引 |
@@ -40,6 +66,11 @@ OSS 配置：`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_BUCKET`、
 | `REPLAY_OBJECT_MIB` | 64 | 单产物、旧流或帧事件集合的读取上限 |
 | `REPLAY_READ_CACHE_MIB` | 32 | 原始对象缓存容量 |
 | `REPLAY_CACHE_MIB` | 64 | 解析后回放视图缓存容量 |
+| `REPLAY_AFT_PATH` | `backend/var/aft.sqlite3` | AFT/cohort 报告与 taxonomy 的 SQLite |
+| `REPLAY_AFT_WORKERS` | 20 | 共享的 Codex 分析并发上限（最大 24） |
+| `REPLAY_EVALUATOR_SOURCE_ROOT` | 未设置 | 只读的 OSWorld evaluator 源码仓库 |
+
+生产环境覆盖了其中两项（`REPLAY_SYNC_INTERVAL=120`、索引路径），见「部署与运维」。
 
 目录列表缓存 10 秒，目录查询结果缓存上限 8 MiB。不可变分块/帧事件缓存 1 小时，
 仍受容量和条目数限制；缓存按 Python 容器实际占用估算，采用 TTL/LRU 淘汰并合并
@@ -60,18 +91,25 @@ backend/
 ├── catalog.py                       # 日期批次、批次详情、任务执行历史
 ├── replay.py                        # 完整/实时轨迹、窗口、执行状态和图片
 ├── artifacts.py                     # OSS 布局和执行目录约束
-├── metadata.py                      # 状态、评分和执行摘要
+├── metadata.py                      # 状态、评分、终态、通过判定和执行摘要
 ├── cache.py                         # TTL/LRU、容量和相同请求合并
 ├── execution_index.py / sync.py      # SQLite 摘要索引和后台扫描
 ├── oss_io/                          # V4 签名、分页列表、流式与有界读取
+├── native_analysis.py               # AFT 作业编排、阶段词表、报告与新鲜度发布
+├── codex.py                         # Codex app-server 传输（stdio/JSON-RPC、模型目录）
+├── aft_store.py                     # AFT/cohort 的 SQLite 表、revision、taxonomy 与缓存
+├── aft_taxonomy.py                  # lhht taxonomy 数据（版本、节点、来源与权重）
+├── aft_atif.py                      # 分析用 ATIF 投影与调用链重建
+├── cohort_reports.py                # 独立 cohort 报告的不可变存储
+├── evaluator_source.py              # 只读 evaluator 源码加载与符号提取
 ├── parsers/                         # 纯解析和转换，不访问 OSS/HTTP
 │   ├── atif_stream.py               # ATIF/实时清单校验
 │   ├── legacy_trace.py              # 旧日志 → Agent Work，完整配对后切窗
 │   ├── legacy_fold.py               # 沿用旧 Replay 的事件折叠语义
 │   ├── legacy_work_helpers.py       # 事件、图片、全局轮次辅助解析
 │   ├── trace_graph.py               # 代理图和调用关系标注
-│   ├── legacy_to_atif.py            # Agent Work → ATIF v1.8
-│   ├── execution_state.py           # 新旧执行状态投影
+│   ├── legacy_to_atif.py            # Agent Work → ATIF v1.8（唯一实现）
+│   ├── execution_state.py           # execution-state/v1 与便携扩展的投影
 │   └── replay_view.py               # 帧、时间轴、状态和快照更新
 └── tests/
 ```
@@ -101,7 +139,10 @@ backend/
 
 - `get_trajectory(run, task)`：优先读取原生完整 ATIF（依次尝试执行根目录、
   `agent/`、`runtime-artifacts/`）。旧日志在后端经 Agent Work 转为 ATIF v1.8。
-  仅有原生实时流时，此接口返回 404，由客户端使用 live 接口。
+  仅有原生实时流时，此接口返回 404，由客户端使用 live 接口。返回前会补齐 Harness
+  run 元数据与桌面时间轴；生产者自带的 `extra.osworld_execution_state` 原样保留，
+  只有本身没有该扩展的来源（旧日志转换结果）才会由后端写入投影，避免用只覆盖部分
+  事件类型的投影覆盖生产者文档。
 - `get_atif_live(run, task, after=0)`：原生流按清单读取尚未消费的分块，返回
   `start_line`、`total_lines`、`records`、`terminal` 和 `stream`。游标超过源长度时
   从 0 重置；历史上传器的重叠分块只在重复记录及序号一致时去重，超过发布游标
@@ -118,15 +159,43 @@ backend/
 - `get_model_image(run, task, path, sha256)`：读取旧模型图片并校验 SHA-256。
 - `get_atif_media(run, task, path)`：读取 ATIF 引用的图片，兼容历史文档目录；
   以 SHA-256 命名的图片会核对摘要。图片检查文件签名，支持 PNG/JPEG/WebP/GIF。
-- `get_agent_work(...)`：迁移期兼容接口。旧格式先配对完整工具调用，再切窗；
-  原生 ATIF 不反向转换成 Agent Work。
+- `get_agent_work(...)`：过渡兼容接口。旧格式先配对完整工具调用，再切窗；
+  原生 ATIF 不反向转换成 Agent Work。已停止的迁移前端仍会调用它，因此保留；
+  当前 Replay 前端不再请求该接口。
 
 支持批次元数据中的 `run_dir`，且路径必须处于该任务目录内。旧日志支持完整
 `runtime-trace.jsonl`、`runtime-artifacts/runtime-trace.jsonl`、v2 分块尾流和早期滚动尾流。
 完整日志优先于尾流；滚动尾流保留已知的 trace coverage 起点。
 
-迁移测试前端已消费统一 ATIF 并代理到新后端，保留实时增量合并和 ATIF → UI
-映射。兼容旧部署的构建模式仍可使用 Agent Work；原服务尚未退役。
+## OSS 数据布局
+
+```text
+<OSS_PREFIX>/harness/<batch_id>/
+├─ batch.json
+└─ tasks/<task_key>/
+   ├─ trajectory.json
+   ├─ agent/trajectory.json                 # 其他已支持的轨迹位置
+   ├─ runtime-artifacts/trajectory.json
+   ├─ trajectory-tail.meta.json
+   ├─ trajectory-tail.jsonl.chunks/
+   ├─ runtime-artifacts/runtime-trace.jsonl # 历史格式
+   ├─ trace-tail.meta.json
+   ├─ trace-tail.jsonl 或其分块目录
+   ├─ replay/meta.json
+   ├─ replay/events/
+   ├─ replay/frames/
+   ├─ run_state.json
+   └─ result.json
+```
+
+上述文件并非每次执行都会同时存在，执行目录也可能按批次元数据中的 `run_dir` 约定
+变化。实验发现与执行历史查询只读批次与结果摘要，不扫描轨迹、截图或图片字节；
+没有截图的合法执行同样会被发现。
+
+前端直接消费统一 ATIF，实时增量合并在浏览器中完成；旧版日志由本后端归一化为
+ATIF，前端不再执行 Agent Work → ATIF 转换，也不再回退到 `/api/agent-work`：
+旧格式存档的可视性完全由本后端保证（`legacy_to_atif` 是唯一实现，前端那份已随
+迁移删除），因此前端没有构建模式开关，只有一条数据路径。
 
 ## HTTP 接口
 
@@ -163,6 +232,28 @@ backend/
 `{ "run": "...", "model": "...", "force": false }`，为终态 run 启动固定的 task-first 分析流程。
 `model` 可省略，值必须来自
 `GET /api/analysis-models`；Run 的 `force=true` 重新聚合并创建可与旧版并存的新 revision，仍复用当前有效的单任务报告；单任务本身需要重跑时使用对应 Execution 的 `force=true`。
+
+作业状态、阶段词表与报告新鲜度由后端判定并随响应发布，调用方不再自行猜测：
+
+- 每个 job 返回 `status`、`terminal`、`phase` 与 `phase_label`。`terminal` 是唯一的终态
+  判定；`phase` 取自固定阶段表（`queued`、`preparing`、`evidence-collection`、
+  `finalizing-report`、`task-analysis`、`common-problem-synthesis`、`completed`、`failed`、
+  `cancelled`），`phase_label` 是它对应的展示文案。
+- task 与 run 报告返回 `current`：`true` 表示这份 revision 对产出它的模型仍然有效，
+  `false` 表示 pipeline、taxonomy、evaluator 摘要或（run 层）run 组成已变化，`null`
+  表示暂时无法判定（例如 OSS 不可用）。列表接口用不含 run 组成检查的轻量判定，因此
+  不读 OSS；`run_state` 会用完整判定。前端据此决定是否 `force`，不再以“有没有报告”代替。
+- `/api/analysis-models` 在每一项上返回 `hidden`。被隐藏的模型是产品可见性策略，仍可按
+  名称选用，以便用产出旧报告的模型重跑，不会因为目录更新而无法复用历史报告。
+
+`/api/execution-state` 只服务旧的 execution-state/v1 事件族，Replay 的 State 面板不再
+读取它：面板只消费轨迹 Harness 扩展里的 `planner_state`、`observer_interval` 与
+`subagent_lifecycle`。
+
+Cohort Report 与普通 AFT run/task report 使用同一 SQLite 文件中的独立表。公网 API
+保持只读；分析完成后使用 `scripts/import_cohort_report.py` 导入经过验证的结构化 JSON
+与 Markdown。相同 `analysis_type + run_id + revision` 不可变：同内容重复导入幂等，
+不同内容会失败，新内容必须使用更高 revision。
 
 分析过程直接读取 ATIF 1.8 core 字段，并从 `subagent_trajectories` 与 `subagent_trajectory_ref`
 确定性重建与 harness 扩展字段解耦的调用链。Task Analyzer 在单个持续 Turn 中主动调用只读工具，生成包含结论、主要问题、调用关系、执行阶段、每个 Turn 和 evaluator 分析的独立报告。
@@ -217,5 +308,6 @@ backend/.venv/bin/python -m unittest discover -s backend/tests -v
 
 2026-09-04 只读抽样验证：索引扫描 194 个已发布批次，无失败；任务 003 查到
 60 次执行、覆盖 10 个日期。原生实时流、完整 ATIF、旧日志、桌面图片读取通过。
-旧日志代表样本转换出的 21 步 ATIF 与现有 TypeScript 转换器输出一致；旧版转换
-结果和原生完整文档均通过前端 ATIF 校验。没有上传对象或切换现有服务。
+旧日志代表样本转换出的 21 步 ATIF 与当时的 TypeScript 转换器输出一致（该前端
+转换器随后已删除，`legacy_to_atif` 是唯一实现）；旧版转换结果和原生完整文档均
+通过前端 ATIF 校验。没有上传对象或切换现有服务。

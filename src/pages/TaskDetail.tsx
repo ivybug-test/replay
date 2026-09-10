@@ -9,9 +9,8 @@ import EnvFileBrowser from '../components/EnvFileBrowser'
 import { FORMAT_LABELS, fmtDuration, fmtPct, fmtReward, prettyModel } from '../lib/format'
 import { aggregate, useDatasetStore, useLookups } from '../lib/dataset'
 import type { Stat } from '../lib/types'
-import { osworldCapabilities, osworldCapabilityLabel } from '../lib/osworld'
+import { osworldCapabilities, osworldCapabilityLabel, osworldTaskId } from '../lib/osworld'
 import TaskExecutionHistory from '../components/TaskExecutionHistory'
-import { standaloneBackend } from '../lib/ossReplay'
 
 export default function TaskDetail() {
   const { taskId } = useParams()
@@ -184,8 +183,8 @@ export default function TaskDetail() {
         )}
 
         {/* Runs */}
-        {task.source === 'osworld' && standaloneBackend ? (
-          <TaskExecutionHistory key={task.id} taskId={task.id.replace(/^osworld-v2-/, '')} />
+        {task.source === 'osworld' ? (
+          <TaskExecutionHistory key={task.id} taskId={osworldTaskId(task)} />
         ) : <section data-tour="task-runs">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">

@@ -5,6 +5,7 @@ import re
 from .oss_io.client import OssProtocolError
 
 TERMINAL = {"succeeded", "failed", "interrupted", "cancelled", "completed", "error"}
+PASS_SCORE = 0.999
 
 
 def task_id(value):
@@ -59,4 +60,8 @@ def execution_summary(execution, result=None, state=None, public_config=None):
         "score": score, "started_at": started, "finished_at": finished,
         "duration_ms": duration_ms(started, finished),
         "error": task.get("error") or result.get("harness_error") or result.get("error"),
+        # Termination and the pass verdict are decided here, so no caller has to
+        # re-derive them from status strings or a score threshold of its own.
+        "terminal": status in TERMINAL,
+        "passed": None if score is None else score >= PASS_SCORE,
     }

@@ -201,7 +201,10 @@ class _ServerSlot:
         self.server: _AppServer | None = None
 
     def acquire(self) -> _AppServer:
-        if self.server is None or self.server.process.poll() is not None:
+        # Temporary-directory cleanup can remove an idle worker's cwd while
+        # its process remains alive. Config loading then fails at thread/start.
+        if (self.server is None or self.server.process.poll() is not None
+                or self.directory is None or not Path(self.directory.name).is_dir()):
             self.close()
             self.directory = tempfile.TemporaryDirectory(prefix='replay-aft-worker-')
             self.server = _AppServer(self.directory.name)

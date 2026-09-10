@@ -9,9 +9,9 @@ import {
   fetchAftRunStatuses, fetchLiveRuns, startRunAnalysis,
   type AftRunStatus, type RunSummary,
 } from '../lib/ossReplay'
+import { isActiveJob, isStaleReport } from '../lib/analysisJobs'
 
 const TERMINAL_RUNS = new Set(['completed', 'completed_with_failures', 'succeeded', 'failed', 'interrupted', 'cancelled', 'error'])
-const TERMINAL_JOBS = new Set(['completed', 'completed_partial', 'failed', 'cancelled'])
 const RUN_STATUSES = ['running', 'interrupted', 'completed'] as const
 type RunStatusFilter = typeof RUN_STATUSES[number]
 const RUN_STATUS_OPTIONS: ReadonlyArray<{
@@ -168,7 +168,7 @@ export default function LiveRuns() {
   }, [analysisReload])
 
   useEffect(() => {
-    if (!Object.values(analysis).some((item) => item.job && !TERMINAL_JOBS.has(item.job.status))) return
+    if (!Object.values(analysis).some((item) => isActiveJob(item.job))) return
     const timer = setTimeout(() => setAnalysisReload((value) => value + 1), 3000)
     return () => clearTimeout(timer)
   }, [analysis])
@@ -266,7 +266,8 @@ export default function LiveRuns() {
           <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {filteredRuns?.map((run) => {
             const aft = analysis[run.batch_id]
-            const active = !!aft?.job && !TERMINAL_JOBS.has(aft.job.status)
+            const active = isActiveJob(aft?.job)
+            const reportStale = isStaleReport(aft?.report)
             const taskProgress = aft?.job?.progress?.task_reports
             const runHref = `/live/runs/${encodeURIComponent(run.batch_id)}`
             return <div key={run.batch_id} data-testid="live-run-card" data-run-status={run.status} className="card group p-5 transition-colors hover:border-accent/40 hover:bg-ink-800/55">
@@ -286,6 +287,10 @@ export default function LiveRuns() {
                       <Sparkles size={11} />
                       {aft.job?.status === 'completed_partial' ? 'View partial AFT' : 'View AFT'}
                     </Link>}
+                    {reportStale && !active && <span className="chip bg-amber-500/10 py-1 text-amber-300 ring-1 ring-amber-500/25"
+                      title="Report is stale: model, pipeline, taxonomy or evaluator context changed">
+                      过期
+                    </span>}
                     {active ? (
                     <span className="chip bg-cyan-500/10 py-1 text-cyan-300 ring-1 ring-cyan-500/25"
                       title={aft.job?.progress?.evidence_requests ? `${aft.job.progress.evidence_requests} evidence tool calls` : undefined}>
@@ -295,7 +300,8 @@ export default function LiveRuns() {
                   ) : (
                     <button type="button"
                       className="chip bg-accent/10 py-1 text-accent ring-1 ring-accent/25 transition-colors hover:bg-accent/20 disabled:cursor-wait disabled:opacity-60"
-                      disabled={starting === run.batch_id} onClick={() => void analyze(run, !!aft?.report)}>
+                      title={reportStale ? 'The stored report is stale, so this run will be analysed again' : undefined}
+                      disabled={starting === run.batch_id} onClick={() => void analyze(run, reportStale)}>
                       {aft?.report ? <RefreshCw size={11} /> : <Sparkles size={11} />}
                       {starting === run.batch_id ? 'Starting…' : aft?.report ? 'Regenerate' : 'Analyze AFT'}
                     </button>

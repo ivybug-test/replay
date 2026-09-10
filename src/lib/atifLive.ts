@@ -187,7 +187,11 @@ export function atifLiveToTrajectory(stream: AtifLiveStream): AtifTrajectory | n
       const event = clone(object(patch.event))
       harnessEvents.push(event)
       const detail = object(event.record)
-      if (event.event_type === 'subagent_lifecycle') attachSubagent(documents, parents, detail)
+      if (event.event_type === 'subagent_lifecycle') {
+        const parent = documentFor(detail.parentAgentId)
+        if (parent && typeof detail.parentRole === 'string') parent.role = detail.parentRole
+        attachSubagent(documents, parents, detail)
+      }
       if (typeof detail.sessionId === 'string') sessionId = detail.sessionId
     }
   }
@@ -201,6 +205,13 @@ export function atifLiveToTrajectory(stream: AtifLiveStream): AtifTrajectory | n
     document.steps.length > 0 && document.steps.every((step, index) => step?.step_id === index + 1)
   ))
   if (!complete.length) return null
+  // A scheduler can own child trajectories without ever making a model call.
+  // Retain its ancestry instead of promoting the first child and losing siblings.
+  for (const document of complete) {
+    const parentId = parents.get(document.id)?.parentId
+    const parent = parentId ? documents.get(parentId) : undefined
+    if (parent && parent.steps.length === 0 && !complete.includes(parent)) complete.push(parent)
+  }
   const root = complete.find((document) => !parents.has(document.id)) ?? complete[0]
   const toTrajectory = (document: LiveDocument, ancestors = new Set<string>()): AtifTrajectory => {
     const path = new Set(ancestors).add(document.id)
@@ -218,7 +229,15 @@ export function atifLiveToTrajectory(stream: AtifLiveStream): AtifTrajectory | n
           ...(document.origin ? { origin: document.origin } : {}),
         } },
       },
-      steps: document.steps,
+      // ATIF requires a non-empty steps array. This is structural metadata,
+      // never a model-visible message or an inferred model/tool invocation.
+      steps: document.steps.length ? document.steps : [{
+        step_id: 1, source: 'system', message: `${document.role} orchestration`, llm_call_count: 0,
+        extra: { osworld_harness: { provenance: {
+          kind: 'empty_trajectory_sentinel', model_visible: false,
+          agent_id: document.id, role: document.role,
+        } } },
+      }],
       ...(children.length ? {
         subagent_trajectories: children.map((child) => toTrajectory(child, path)),
       } : {}),

@@ -34,29 +34,6 @@ def descriptors(doc, *, legacy=False):
     return chunks
 
 
-def assemble_records(meta, chunks):
-    """Recover identical historical upload overlaps without publishing unready tails."""
-    records, duplicates = [], 0
-    for descriptor, chunk in zip(meta['chunks'], chunks):
-        for offset, record in enumerate(chunk):
-            position = descriptor['start'] + offset
-            if position >= meta['total_lines']:
-                if record.get('stream_sequence') != position + 1:
-                    raise OssProtocolError('Unpublished tail has invalid sequence')
-                continue
-            if position < len(records):
-                if record.get('stream_sequence') != position + 1 or records[position] != record:
-                    raise OssProtocolError('Conflicting overlapping records')
-                duplicates += 1
-            elif position == len(records):
-                records.append(record)
-            else:
-                raise OssProtocolError('Gap in stream records')
-    if len(records) != meta['total_lines']:
-        raise OssProtocolError('Stream length mismatch')
-    return records, duplicates
-
-
 def validate_records(records):
     for record in records:
         if (record.get('trace_format') != 'atif-stream'

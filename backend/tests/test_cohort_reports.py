@@ -19,6 +19,17 @@ def document(revision=1, sample="sample-001"):
     }
 
 
+def task_document(revision=2):
+    return {
+        "schema_version": "todolist-quality-task-report/v2",
+        "analysis_type": "todolist-quality",
+        "run_id": "run-1",
+        "revision": revision,
+        "created_at": "2026-09-07T14:39:05Z",
+        "task_dossiers": [{"task_id": "001"}],
+    }
+
+
 class CohortReportStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -44,6 +55,11 @@ class CohortReportStoreTests(unittest.TestCase):
         invalid["analysis_type"] = "aft"
         with self.assertRaisesRegex(ValueError, "analysis type"):
             self.store.create(invalid, "# Report", "Title", "Summary")
+
+    def test_accepts_detailed_task_report_v2(self):
+        created = self.store.create(task_document(), "# Detailed", "Title", "Summary")
+        self.assertEqual(created["revision"], 2)
+        self.assertEqual(created["document"]["task_dossiers"][0]["task_id"], "001")
 
 
 if __name__ == "__main__":

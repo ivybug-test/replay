@@ -1,4 +1,10 @@
-"""Python port of src/lib/legacyTraceToAtif.ts; legacy semantics stay server-side."""
+"""Convert legacy Agent Work into ATIF v1.8; legacy semantics stay server-side.
+
+This is the only implementation: the frontend copy (a TypeScript converter that
+produced the same document) was deleted once the frontend stopped reading
+`/api/agent-work`, so an old-format archive is viewable only through this
+backend and `ReplayService._load_view`.
+"""
 import json
 from pathlib import PurePosixPath
 

@@ -1,5 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate'
 import { atifTrajectoryToSteps } from './atifToViewer'
+import { modelFamily } from './modelFamily'
 import type { Agent, Edit, FileKind, Mutation, Run, Step, Task, Vendor } from './types'
 
 // ---------------------------------------------------------------------------
@@ -48,13 +49,6 @@ function cleanModel(raw?: string | null) {
   let m = String(raw).split('/').pop()!.replace(/_/g, '-').trim().toLowerCase()
   m = m.replace(/^(anthropic|openai|google|openrouter)-/, '')
   return m || null
-}
-function modelFamily(raw?: string | null) {
-  const s = String(raw ?? '').toLowerCase()
-  if (s.includes('claude')) return 'Anthropic'
-  if (s.includes('gemini')) return 'Google'
-  if (s.includes('gpt') || s.includes('codex') || s.includes('openai')) return 'OpenAI'
-  return 'unknown'
 }
 function makeAgent(harnessRaw: string | null, modelRaw: string | null, agents: Map<string, Agent>): string {
   const model = cleanModel(modelRaw)

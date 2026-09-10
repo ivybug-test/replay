@@ -12,8 +12,7 @@ import {
   type AftRunReportSummary, type AftRunStatus, type ProblemTag,
 } from '../lib/ossReplay'
 import { fetchCohortReports, type CohortReportSummary } from '../lib/cohortReports'
-
-const TERMINAL_JOBS = new Set(['completed', 'completed_partial', 'failed', 'cancelled'])
+import { isActiveJob, jobPhaseLabel } from '../lib/analysisJobs'
 
 const EDGE_COLORS = ['bg-sky-400', 'bg-violet-400', 'bg-amber-400', 'bg-fuchsia-400',
   'bg-cyan-400', 'bg-emerald-400', 'bg-indigo-400', 'bg-orange-400', 'bg-rose-400', 'bg-lime-400']
@@ -74,9 +73,7 @@ export default function AftReports() {
     return () => controller.abort()
   }, [statusRevision])
 
-  const activeRuns = Object.entries(runStatuses).filter(([, value]) => (
-    value.job && !TERMINAL_JOBS.has(value.job.status)
-  ))
+  const activeRuns = Object.entries(runStatuses).filter(([, value]) => isActiveJob(value.job))
   useEffect(() => {
     if (!activeRuns.length) return
     const timer = setTimeout(() => setStatusRevision((value) => value + 1), 3000)
@@ -115,7 +112,7 @@ export default function AftReports() {
               <div className="flex flex-wrap items-center gap-3 text-xs">
                 <Link to={`/live/runs/${encodeURIComponent(runId)}`} className="font-mono font-medium text-zinc-200 hover:text-accent">{runId}</Link>
                 <span className="text-zinc-600">{job.model}</span>
-                <span className="text-accent">{progress?.phase || job.stage || job.status}</span>
+                <span className="text-accent">{jobPhaseLabel(job, job.status)}</span>
                 <span className="ml-auto tabular-nums text-zinc-400">{percent}%</span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-ink-700"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${percent}%` }} /></div>
@@ -263,6 +260,7 @@ export default function AftReports() {
                   <span className="text-zinc-400">{report.model}</span>
                   <span>revision {report.revision}</span>
                   <span>{new Date(report.created_at).toLocaleString()}</span>
+                  {report.current === false && <span className="chip bg-amber-500/10 text-[10px] text-amber-300">已过期</span>}
                 </div>
               </div>
               <ArrowUpRight size={14} className="shrink-0 text-zinc-700 transition-colors group-hover:text-accent" />

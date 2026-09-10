@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Activity, ArrowUpRight, CheckCircle2, Clock3, FileText, RotateCcw, Target } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowUpRight, CheckCircle2, Clock3, FileText, RotateCcw, Target } from 'lucide-react'
 import { PageHeader } from '../components/Layout'
 import Markdown from '../components/Markdown'
 import { Loading } from '../components/ui'
@@ -8,8 +8,7 @@ import {
   fetchAftReport, fetchRunAnalysis, startRunAnalysis,
   type AftRunReport, type AftRunStatus,
 } from '../lib/ossReplay'
-
-const TERMINAL_JOBS = new Set(['completed', 'completed_partial', 'failed', 'cancelled'])
+import { isActiveJob, isStaleReport, isTerminalJob } from '../lib/analysisJobs'
 
 function displayNumber(value: unknown, digits = 0) {
   return typeof value === 'number' ? value.toFixed(digits) : '—'
@@ -48,22 +47,28 @@ export default function AftReportDetail() {
       if (controller.signal.aborted) return
       setRunStatus({ job: next.job, report: next.report })
       if (next.report?.report_id && next.report.report_id !== report.report_id
-          && next.job && TERMINAL_JOBS.has(next.job.status)) {
+          && isTerminalJob(next.job)) {
         navigate(`/aft-reports/${encodeURIComponent(next.report.report_id)}`, { replace: true })
         return
       }
-      if (next.job && !TERMINAL_JOBS.has(next.job.status)) {
+      if (isActiveJob(next.job)) {
         timer = setTimeout(() => setPollRevision((value) => value + 1), 3000)
       }
     }).catch((reason) => { if (!controller.signal.aborted) setError(String(reason)) })
     return () => { controller.abort(); clearTimeout(timer) }
   }, [navigate, pollRevision, report?.report_id, report?.run_id])
+  const active = isActiveJob(runStatus?.job)
+  const jobFailed = !!runStatus?.job && ['failed', 'cancelled'].includes(runStatus.job.status)
   const regenerate = async () => {
     if (!report) return
     setStarting(true)
     setError(null)
     try {
-      const next = await startRunAnalysis(report.run_id, report.model, undefined, true)
+      // Force only when the report is known to be stale or the last attempt
+      // failed; otherwise let the backend reuse a current report.
+      const next = await startRunAnalysis(
+        report.run_id, report.model, undefined, isStaleReport(report) || jobFailed,
+      )
       setRunStatus({ job: next.job, report: next.report })
       setPollRevision((value) => value + 1)
     } catch (reason) {
@@ -72,7 +77,6 @@ export default function AftReportDetail() {
       setStarting(false)
     }
   }
-  const active = !!runStatus?.job && !TERMINAL_JOBS.has(runStatus.job.status)
   const progress = runStatus?.job?.progress
   const taskProgress = progress?.task_reports
   const summary = report?.document.summary ?? {}
@@ -90,7 +94,9 @@ export default function AftReportDetail() {
       <Loading label="正在加载 Run 报告…" />
     ) : <div className="mx-auto max-w-6xl space-y-5 p-8">
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-600">
-        <span className="chip bg-emerald-500/10 text-emerald-300"><CheckCircle2 size={11} /> 后端分析完成</span>
+        {isStaleReport(report)
+          ? <span className="chip bg-amber-500/10 text-amber-300"><AlertTriangle size={11} /> 报告已过期</span>
+          : <span className="chip bg-emerald-500/10 text-emerald-300"><CheckCircle2 size={11} /> 后端分析完成</span>}
         <span className="text-zinc-400">{report.model}</span><span>{report.taxonomy_version}</span>
         <span>revision {report.revision}</span><span>{new Date(report.created_at).toLocaleString()}</span>
       </div>

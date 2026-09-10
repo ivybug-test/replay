@@ -19,7 +19,12 @@ try {
   const links = page.locator('a[href^="/tasks/osworld-v2-"]')
   await links.first().waitFor()
   assert.deepEqual(await links.evaluateAll((items) => items.map((item) => item.getAttribute('href').split('/').pop()).sort()), expectedIds)
-  assert.ok(await page.locator(`a[href="/tasks/${original.tasks[0].id}"]`).count(), 'Original tasks remain available')
+  // Non-OSWorld vendors start collapsed so the imported catalog is what a
+  // visitor sees first; the bundled tasks are still reachable, one click away.
+  const bundledVendor = original.vendors.find((vendor) => vendor.id !== 'osworld-v2')
+  const collapsedSection = page.locator(`section:has-text("${bundledVendor.name}") button[aria-expanded="false"]`).first()
+  await collapsedSection.click()
+  await page.locator(`a[href="/tasks/${original.tasks[0].id}"]`).first().waitFor()
   console.log(`PASS all ${expectedIds.length} imported tasks and original tasks appear together`)
 
   const assertVisible = async (ids) => {
@@ -72,7 +77,10 @@ try {
   await page.locator('[data-tour="task-files"]').waitFor()
   assert.equal(await page.getByRole('heading', { name: catalog.tasks[0].title, exact: true }).count(), 1)
   assert.ok((await page.locator('[data-tour="task-files"]').innerText()).includes('instruction.md'))
-  assert.equal(await page.getByRole('heading', { name: 'Agent runs (0)', exact: true }).count(), 1)
+  // OSWorld task pages read the backend execution index, whose count depends on
+  // what the backend has indexed, so only require that the section rendered.
+  const runsHeading = await page.getByRole('heading', { name: /^Agent runs \(/ }).first().innerText()
+  assert.match(runsHeading, /^Agent runs \(\d+\+?\)$/i)
   assert.equal(await page.getByText('This task contains runtime values.', { exact: false }).count(), 0)
   for (const capability of catalog.tasks[0].metadata.capabilities) {
     assert.ok(await page.getByText(label(capability), { exact: true }).count())

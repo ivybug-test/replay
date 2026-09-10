@@ -3,6 +3,9 @@ import clsx from 'clsx'
 import type { PlannerNodeV1, PlannerStateV1 } from '../lib/osworldAtifExtra'
 import type { ExecutionStateEvent, ExecutionStateFeed } from '../lib/ossReplay'
 
+import HohStateCard from './HohStateCard'
+import type { HohState } from '../lib/hohState'
+
 const PAGE_SIZE = 40
 
 function clock(ms: number): string {
@@ -118,6 +121,10 @@ function ExecutionStatePanel({ feed, playheadMs, onJump }: {
   onJump: (atMs: number) => void
 }) {
   const [page, setPage] = useState(0)
+  const hohUpdates = useMemo(() => feed.events.filter(event => event.event === 'hoh_state')
+    .sort((a, b) => a.episode_elapsed_ms - b.episode_elapsed_ms || a.sequence - b.sequence), [feed.events])
+  const pastHoh = hohUpdates.filter(event => event.episode_elapsed_ms <= playheadMs)
+  const currentHoh = pastHoh[pastHoh.length - 1]
   const planEvents = useMemo(() => feed.events.filter(event => event.event === 'planner_state')
     .sort((a, b) => a.episode_elapsed_ms - b.episode_elapsed_ms || a.sequence - b.sequence), [feed.events])
   const observerEvents = useMemo(() => feed.events.filter(event => event.event === 'observer_interval')
@@ -132,8 +139,14 @@ function ExecutionStatePanel({ feed, playheadMs, onJump }: {
     <section className="space-y-4" aria-label="Execution State">
       <div>
         <h2 className="text-sm font-semibold text-zinc-100">Execution State</h2>
-        <p className="mt-1 text-xs text-zinc-500">Planner · {planEvents.length} updates · Observer · {observerEvents.length} intervals</p>
+        <p className="mt-1 text-xs text-zinc-500">Harness · {hohUpdates.length} updates · Planner · {planEvents.length} updates · Observer · {observerEvents.length} intervals</p>
       </div>
+
+      {!!hohUpdates.length && <div className="space-y-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Harness at playhead</h3>
+        {currentHoh ? <HohStateCard state={currentHoh.record as unknown as HohState} atMs={currentHoh.episode_elapsed_ms} onJump={onJump} />
+          : <p className="text-xs text-zinc-500">Harness state not initialized at this position.</p>}
+      </div>}
 
       {!!planEvents.length && <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -165,7 +178,7 @@ function ExecutionStatePanel({ feed, playheadMs, onJump }: {
         </div>
       </div>}
 
-      {!planEvents.length && !observerEvents.length && <p className="text-sm text-zinc-500">{feed.terminal ? 'No Planner or Observer state recorded.' : 'Waiting for Planner state…'}</p>}
+      {!hohUpdates.length && !planEvents.length && !observerEvents.length && <p className="text-sm text-zinc-500">{feed.terminal ? 'No Planner or Observer state recorded.' : 'Waiting for Planner state…'}</p>}
       {pageCount > 1 && <div className="flex items-center justify-between text-xs text-zinc-500">
         <button disabled={activePage === 0} onClick={() => setPage(activePage - 1)} className="btn-ghost disabled:opacity-30">← Previous</button>
         <span>{activePage + 1} / {pageCount}</span>

@@ -3,7 +3,10 @@
 The user systemd timer samples `/proc/meminfo` every approximately 5 seconds
 (`AccuracySec=1s`). Usage is `100 * (MemTotal - MemAvailable) / MemTotal`.
 
-- At 80% or higher, stop `replay-18768.service` and `oss-replay-18767.service`.
+- At 80% or higher, stop the units in `REPLAY_GUARD_UNITS` — by default
+  `replay-18768.service` and `oss-replay-18767.service`. This host adds
+  `replay-backend-18769.service` through the drop-in below, so the frontend, the
+  legacy service and the Replay backend are all shed together.
 - Keep services stopped until usage stays below 75% for 60 seconds of samples.
 - At 85% or higher, also emit a critical journal message on threshold crossing.
 - Restore only services observed running when the guard stopped them. Services
@@ -43,12 +46,17 @@ before re-enabling the timer. The installed unit explicitly sets
 by root and inaccessible to the service user, so the guard uses its own directory
 under the user's configuration directory.
 
-After migrating OSS functionality, disable the old service and set this in a
-`replay-memory-guard.service` drop-in, then run `systemctl --user daemon-reload`:
+The OSS functionality has since migrated to the Replay backend, so retiring the
+old service is now an operational step rather than a prerequisite. This host
+already extends the guard to the backend through the drop-in, and the old service
+is still running alongside it:
 
 ```ini
 [Service]
-Environment="REPLAY_GUARD_UNITS=replay-18768.service"
+Environment="REPLAY_GUARD_UNITS=replay-18768.service oss-replay-18767.service replay-backend-18769.service"
 ```
+
+To retire the old service, stop and disable `oss-replay-18767.service`, then drop
+it from `REPLAY_GUARD_UNITS` and run `systemctl --user daemon-reload`.
 
 Validation: `python3 -m unittest discover -s deploy -p test_memory_guard.py`.

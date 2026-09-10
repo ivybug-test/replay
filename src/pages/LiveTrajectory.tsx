@@ -1,19 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loading } from '../components/ui'
-import { fetchExecutionState, fetchViewerBundle, type ViewerBundle } from '../lib/ossReplay'
+import { fetchViewerBundle, type ViewerBundle } from '../lib/ossReplay'
 import TrajectoryViewer from './TrajectoryViewer'
 
-const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'interrupted', 'completed', 'error'])
+// Only used when the backend does not publish `terminal` yet.
+const LEGACY_TERMINAL_STATUSES = new Set([
+  'succeeded', 'failed', 'interrupted', 'cancelled', 'completed', 'error',
+])
 
 export default function LiveTrajectory() {
   const { batchId = '', taskKey = '' } = useParams()
   const [bundle, setBundle] = useState<ViewerBundle | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const loadExecutionState = useCallback(
-    (signal?: AbortSignal) => fetchExecutionState(batchId, taskKey, signal),
-    [batchId, taskKey],
-  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -30,8 +29,11 @@ export default function LiveTrajectory() {
         consecutiveFailures = 0
         setBundle(next)
         setError(null)
-        const status = String(next.task.metadata?.execution_status ?? '')
-        if (next.hasMore || !TERMINAL_TASK_STATUSES.has(status)) timer = setTimeout(refresh, next.hasMore ? 100 : 2_000)
+        const terminal = next.task.metadata?.execution_terminal
+        const running = terminal === true ? false
+          : terminal === false ? true
+            : !LEGACY_TERMINAL_STATUSES.has(String(next.task.metadata?.execution_status ?? ''))
+        if (next.hasMore || running) timer = setTimeout(refresh, next.hasMore ? 100 : 2_000)
       } catch (reason) {
         if (controller.signal.aborted) return
         if (!hasBundle) setError(String(reason))
@@ -57,7 +59,6 @@ export default function LiveTrajectory() {
       vendorOverride={bundle.vendor}
       desktopTimeline={bundle.desktopTimeline}
       executionState={bundle.executionState}
-      loadExecutionState={loadExecutionState}
       backTo={`/live/runs/${encodeURIComponent(batchId)}`}
     />
   )

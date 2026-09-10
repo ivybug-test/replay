@@ -134,18 +134,19 @@ export default function AftInsights() {
           <div className="card mx-auto max-w-2xl p-7 text-sm leading-relaxed text-zinc-300">
             <h2 className="mb-3 text-lg font-semibold text-white">No pre-computed AFT reports yet</h2>
             <p>
-              The <strong>Agent Failure Taxonomy</strong> panel maps each run's
-              failure to four orthogonal axes — when it went wrong (Stage),
-              why (Root cause), what the agent did (Behaviour), and how bad
-              (Impact). This page aggregates across reports once they exist.
+              This page only aggregates the <strong>bundled</strong> reports shipped in{' '}
+              <code className="rounded bg-ink-800 px-1">public/aft/</code> for the sample dataset. Live
+              OSWorld runs are analysed by the backend Analyzer instead — read those under{' '}
+              <span className="text-zinc-200">AFT reports</span>, not here.
             </p>
             <p className="mt-3">
-              To add a report, open any trajectory and click{' '}
-              <span className="text-zinc-200">Apply AFT analysis</span> — it runs with your own
-              Anthropic / OpenAI API key directly in the browser (the key is never uploaded). The
-              result is cached locally, and any reports baked into{' '}
-              <code className="rounded bg-ink-800 px-1">public/aft/&lt;runId&gt;.json</code> load
-              automatically on every visitor session with no key required.
+              For a bundled run, open its trajectory and click{' '}
+              <span className="text-zinc-200">Apply AFT analysis</span> — the browser-side engine runs
+              the AFT v1.0 audit with your own Anthropic / OpenAI API key (the key is never uploaded).
+              The result is cached in this browser only, so it does not appear on this page for other
+              visitors; only reports baked into{' '}
+              <code className="rounded bg-ink-800 px-1">public/aft/&lt;runId&gt;.json</code> load for
+              everyone without a key.
             </p>
           </div>
         </div>

@@ -2,7 +2,8 @@
 
 Labels and definitions are editorial normalizations over the linked original
 findings. They are mapping targets, never evidence that a run exhibited a
-problem. See docs/long-horizon-harness-taxonomy-2026-09-07.md.
+problem. Every node carries its own sources with locators and exclusion
+conditions; this module is the reference for them.
 """
 
 TAXONOMY_VERSION = 'lhht/2026-09-07.1'

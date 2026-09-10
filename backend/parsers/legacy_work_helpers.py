@@ -6,8 +6,8 @@ Everything downstream — HTTP responses, the Vue frontend, analysis tools —
 consumes the view model it emits and never sees `event.type` dispatch.
 
 The fold semantics are the port of the former frontend foldWork/agent-work
-state machine; the ordering contract is docs/trace-schema.md (real episode
-time, ties by sequence).
+state machine; the ordering contract is real episode time, with ties broken by
+sequence.
 """
 from __future__ import annotations
 

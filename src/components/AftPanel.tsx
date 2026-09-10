@@ -114,6 +114,13 @@ export default function AftPanel({
 
   return (
     <div className="space-y-4">
+      {/* This is the browser-side engine. Live OSS executions are analysed by the
+          backend Analyzer with a different taxonomy, so name the one on screen. */}
+      <p className="rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-1.5 text-[11px] leading-relaxed text-zinc-500">
+        <span className="font-medium text-zinc-300">浏览器内 AFT</span> · AFT v1.0 taxonomy ·
+        用你自己的 API key 在这个标签页里运行，报告只保存在本浏览器。
+        带 OSS execution 元数据的运行改用后端 Analyzer（long-horizon harness taxonomy）。
+      </p>
       <div className="flex items-center justify-between gap-2">
         {report ? (
           <span className="flex items-center gap-2 text-xs text-zinc-400">

@@ -1,6 +1,8 @@
 """Persistent Codex worker-pool behavior."""
 
 import json
+from pathlib import Path
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -107,6 +109,28 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertEqual(runner.run_json('three', **arguments), {'ok': True})
         self.assertEqual(FakeServer.created, 2)
         runner.close()
+        self.assertEqual(FakeServer.closed, 2)
+
+    @patch('backend.codex._AppServer', FakeServer)
+    def test_worker_with_deleted_working_directory_is_replaced(self):
+        runner = CodexRunner(workers=1)
+        arguments = {
+            'schema': {'type': 'object'}, 'model': 'gpt-test',
+            'developer_instructions': 'test', 'timeout': 2,
+        }
+        try:
+            self.assertEqual(runner.run_json('one', **arguments), {'ok': True})
+            old_cwd = FakeServer.thread_start_params[-1]['cwd']
+            shutil.rmtree(old_cwd)
+            self.assertEqual(runner.run_json('two', **arguments), {'ok': True})
+            new_cwd = FakeServer.thread_start_params[-1]['cwd']
+            self.assertNotEqual(new_cwd, old_cwd)
+            self.assertTrue(Path(new_cwd).is_dir())
+            self.assertEqual(FakeServer.created, 2)
+            self.assertEqual(FakeServer.closed, 1)
+        finally:
+            runner.close()
+        self.assertFalse(Path(new_cwd).exists())
         self.assertEqual(FakeServer.closed, 2)
 
     @patch('backend.codex._AppServer', FakeServer)

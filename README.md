@@ -9,12 +9,21 @@ The production UI is available on port 18768; its `/api` requests are served by
 the standalone backend on localhost port 18769. Start with
 [Overview](http://47.120.53.174:18768/overview),
 [Live runs](http://47.120.53.174:18768/live), or
-[AFT reports](http://47.120.53.174:18768/aft-reports). See
-[backend documentation](./backend/README.md) for storage, APIs, and analysis behavior.
+[AFT reports](http://47.120.53.174:18768/aft-reports).
 
-The first migration slice is available at `/live`: it lists real OSS runs,
-opens their tasks, loads the complete semantic Agent Work sequence, and shows
-causal desktop screenshots through the existing authenticated image API.
+Documentation map:
+
+- [docs/guide.md](./docs/guide.md) — repository guide: module and per-file
+  responsibilities, what every document is for, how to run and test it, and the
+  conventions a change must not break. Start here when taking over.
+- [backend/README.md](./backend/README.md) — backend reference: OSS layout,
+  HTTP contract, caching/resource limits, analysis pipeline, deployment.
+- [deploy/README-memory-guard.md](./deploy/README-memory-guard.md) — host memory
+  guard rules and operation.
+
+`/live` lists real OSS runs, opens their tasks, loads each trajectory as ATIF v1.8
+from the backend (converting an old-format trace there when the producer never
+wrote native ATIF), and shows causal desktop screenshots from the image API.
 
 ```bash
 npm install
@@ -22,13 +31,14 @@ npm run dev          # http://127.0.0.1:5174/live
 ```
 
 The Vite development server proxies `/api` to `http://127.0.0.1:18769`. Set
-`REPLAY_BACKEND_URL` to use another backend. See [MIGRATION.md](./MIGRATION.md)
-for the capability map and migration order.
+`REPLAY_BACKEND_URL` to use another backend.
 
-Native ATIF live replay is served directly from immutable OSS chunks. Set
-`REPLAY_OSS_ENV_FILE` to an env file containing only the standard `OSS_*`
-settings (the production unit points at the Harness env file); credentials
-remain server-side.
+The Node server owns no OSS credentials and forwards every `/api` request,
+including `/api/atif-live`, to `REPLAY_BACKEND_URL` (default
+`http://127.0.0.1:18769`); the backend reads native ATIF live chunks from OSS and
+keeps credentials server-side. It propagates an aborted client request to both the
+upstream request and response, so a cancelled page load cannot leave a backend
+read running.
 
 Production deployment on this host is managed by the user systemd service
 `replay-18768.service`:
@@ -44,7 +54,18 @@ outcomes and global turn budget, followed by Observer descriptions. It reads
 `planner_state` and `observer_interval` events from live/archived Harness ATIF,
 using `state.planner` or `state.observer` only when the corresponding history is
 missing. Time links jump to the source timestamp. Old Goal, Action, Checkpoint
-and other execution metrics are no longer displayed.
+and other execution metrics are no longer displayed, and the panel has exactly
+one feed: the Harness extension carried by the trajectory. The backend's
+`/api/execution-state` documents the legacy execution-state/v1 events and cannot
+produce this state.
+
+For HoH runs, State also reconstructs Harness commits from stage lifecycle events:
+fixed artifacts, the current loop's task items (target/preserve/gate), and global
+verified/gaps with artifact bindings, reasons and expandable evidence. Executor
+invalidation removes verified at its recorded timestamp, including failed stages;
+it never creates gaps. All values follow the playhead, and the update timestamp
+jumps to its source. Older runs without artifact declarations show that data as
+unrecorded. Model drafts and uncommitted yield arguments are not treated as state.
 
 ### Steps navigation
 
@@ -60,11 +81,44 @@ numbers or playback. Live polls preserve manual folds; selecting a different
 step through playback, State or another panel reveals only that agent's steps.
 Older datasets without agent metadata remain a flat list. No delegation edges
 are guessed from message roles or adjacent timestamps.
+Live replay also retains lifecycle-declared orchestration parents with no model
+steps, so sibling stages remain visible. Their system placeholder is marked
+non-model-visible with zero model calls; it does not imply a tool dispatch.
 
-Checks: `npm test`, `npm run lint`, and `npm run build`. For browser interaction
-checks, run `npx playwright install chromium` once, then `npm run test:browser`
-against the running build (default `http://127.0.0.1:18768`, overridable with
-`REPLAY_TEST_URL`). Browser tests mock their own API responses, not server data.
+### AFT analysis
+
+The `AFT` tab reads from one of two engines, and says which one is on screen:
+
+- For a live OSS execution the backend Analyzer produces the report
+  (`/api/execution-analysis`). It maps the run onto the long-horizon harness
+  taxonomy `lhht/2026-09-07.1`, and the panel shows the model and revision that
+  produced it plus whether that revision is still current. Reports are started
+  from that panel or from `Live runs`, and the run-level common-problem report is
+  under `AFT reports`.
+- For a bundled or uploaded run the browser runs a single-shot AFT v1.0 audit
+  with the reader's own Anthropic/OpenAI API key, stored only in that browser.
+  Nothing about it reaches the backend.
+
+Checks: `npm test` (frontend unit tests plus the proxy regression tests),
+`npm run lint`, and `npm run build`. The backend has its own suite
+(`backend/.venv/bin/python -m unittest discover -s backend/tests`), and the
+importer checks are listed under OSWorld 2.0 tasks below.
+
+For browser interaction checks, run `npx playwright install chromium` once, then
+`npm run test:browser` against a running build (default `http://127.0.0.1:18768`,
+overridable with `REPLAY_TEST_URL`). `npm run test:browser` is
+`tests/steps.browser.mjs`; run the others directly, since they cover different
+surfaces: `node tests/hoh-state.browser.mjs` and `node tests/liveRecovery.browser.mjs`
+mock their own API responses, `node tests/osworld.browser.mjs` checks the imported
+catalog, and `node tests/migration.browser.mjs` is a read-only integration test
+against the real backend (no mocks).
+
+There is one build mode. The frontend always consumes the backend's normalized
+ATIF: OSWorld task pages read its execution index, and a run with neither a
+terminal document nor a live stream reports that it is waiting instead of
+reading `/api/agent-work`. Old-format archives keep rendering because the
+backend converts them (`backend/parsers/legacy_to_atif.py`); `npm run dev`
+proxies `/api` to the backend on 18769.
 
 ## OSWorld 2.0 tasks
 

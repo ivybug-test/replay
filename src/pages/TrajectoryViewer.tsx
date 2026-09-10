@@ -178,7 +178,6 @@ interface TrajectoryViewerProps {
   vendorOverride?: Vendor
   desktopTimeline?: DesktopFrame[]
   executionState?: ExecutionStateFeed
-  loadExecutionState?: (signal?: AbortSignal) => Promise<ExecutionStateFeed>
   verifierLogOverride?: string | null
   backTo?: string
 }
@@ -190,7 +189,6 @@ export default function TrajectoryViewer({
   vendorOverride,
   desktopTimeline,
   executionState: initialExecutionState,
-  loadExecutionState,
   verifierLogOverride,
   backTo,
 }: TrajectoryViewerProps = {}) {
@@ -221,9 +219,6 @@ export default function TrajectoryViewer({
       ? panelParam as RailPanel : 'step'
   ))
   const [executionState, setExecutionState] = useState(initialExecutionState)
-  const [stateLoading, setStateLoading] = useState(false)
-  const [stateError, setStateError] = useState<string | null>(null)
-  const stateRequestRef = useRef<AbortController | null>(null)
   const [aftSteps, setAftSteps] = useState<Set<number>>(new Set())
   const [labels, setLabels] = useState<HumanLabel[]>([])
   const [noteDraft, setNoteDraft] = useState('')
@@ -244,7 +239,7 @@ export default function TrajectoryViewer({
   const stepCount = loadedSteps.length
   const hasDesktopTimeline = !!desktopTimeline?.length
   const visibleStateEventCount = executionState?.events.filter(event =>
-    event.event === 'observer_interval' || event.event === 'planner_state').length ?? 0
+    event.event === 'observer_interval' || event.event === 'planner_state' || event.event === 'hoh_state').length ?? 0
   const timedDurationMs = useMemo(() => Math.max(
     (runForSteps?.durationSec ?? 0) * 1000,
     desktopTimeline?.[desktopTimeline.length - 1]?.atMs ?? 0,
@@ -260,8 +255,8 @@ export default function TrajectoryViewer({
   const selectStep = useCallback((index: number) => {
     const next = Math.max(0, Math.min(index, Math.max(0, loadedSteps.length - 1)))
     setActiveStep(next)
-    if (hasDesktopTimeline && loadedSteps[next]) moveDesktopCursor(stepAnchorMs(loadedSteps[next]))
-  }, [hasDesktopTimeline, loadedSteps, moveDesktopCursor])
+    if (loadedSteps[next]) moveDesktopCursor(stepAnchorMs(loadedSteps[next]))
+  }, [loadedSteps, moveDesktopCursor])
 
   const seekDesktop = useCallback((atMs: number) => {
     moveDesktopCursor(atMs)
@@ -285,31 +280,12 @@ export default function TrajectoryViewer({
   }, [replayKey, desktopTimeline, loadedSteps, moveDesktopCursor])
 
   useEffect(() => {
-    stateRequestRef.current?.abort()
-    stateRequestRef.current = null
     setExecutionState(initialExecutionState)
-    setStateLoading(false)
-    setStateError(null)
-    return () => stateRequestRef.current?.abort()
   }, [replayKey, initialExecutionState])
 
   const selectPanel = useCallback((nextPanel: typeof panel) => {
     setPanel(nextPanel)
-    if (nextPanel !== 'state' || executionState || stateLoading || !loadExecutionState) return
-    const controller = new AbortController()
-    stateRequestRef.current = controller
-    setStateLoading(true)
-    setStateError(null)
-    loadExecutionState(controller.signal)
-      .then(setExecutionState)
-      .catch((reason) => {
-        if (!controller.signal.aborted) setStateError(String(reason))
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setStateLoading(false)
-        if (stateRequestRef.current === controller) stateRequestRef.current = null
-      })
-  }, [executionState, loadExecutionState, stateLoading])
+  }, [])
 
   useEffect(() => {
     if (!loadedSteps.length) return
@@ -376,9 +352,9 @@ export default function TrajectoryViewer({
       return () => cancelAnimationFrame(animation)
     }
     if (activeStep >= stepCount - 1) { setPlaying(false); return }
-    const id = setTimeout(() => setActiveStep((s) => Math.min(s + 1, stepCount - 1)), 1000 / speed)
+    const id = setTimeout(() => selectStep(activeStep + 1), 1000 / speed)
     return () => clearTimeout(id)
-  }, [playing, activeStep, speed, stepCount, hasDesktopTimeline, timedDurationMs, loadedSteps])
+  }, [playing, activeStep, speed, stepCount, hasDesktopTimeline, timedDurationMs, loadedSteps, selectStep])
 
   if (!runOverride && error) return <div className="p-8 text-rose-400">Failed to load dataset: {error}</div>
   if (!runOverride && (!data || !lk)) return <Loading />
@@ -484,7 +460,7 @@ export default function TrajectoryViewer({
             moveDesktopCursor(0)
             setActiveStep(0)
           } else if (!hasDesktopTimeline && activeStep >= erun.steps.length - 1) {
-            setActiveStep(0)
+            selectStep(0)
           }
           setPlaying((p) => !p)
         }}
@@ -551,7 +527,7 @@ export default function TrajectoryViewer({
               ['artifacts', `Changes${run.artifacts?.length ? ` (${run.artifacts.length})` : ''}`],
               ['aft', 'AFT'],
               ['labels', 'Label/Note'],
-            ] as const).filter(([p]) => p !== 'state' || visibleStateEventCount > 0 || !!loadExecutionState).map(([p, lbl]) => (
+            ] as const).filter(([p]) => p !== 'state' || visibleStateEventCount > 0).map(([p, lbl]) => (
               <button
                 key={p}
                 data-tour={`tab-${p}`}
@@ -569,21 +545,16 @@ export default function TrajectoryViewer({
           <div data-tour="rail-content" className="flex-1 overflow-y-auto p-4">
             {panel === 'step' ? (
               <StepPanel step={step} />
-            ) : panel === 'state' && stateLoading ? (
-              <Loading label="Loading execution state…" />
-            ) : panel === 'state' && stateError ? (
-              <div className="space-y-3 text-sm text-rose-400">
-                <p>Failed to load execution state: {stateError}</p>
-                <button className="btn-ghost" onClick={() => { setStateError(null); selectPanel('state') }}>Retry</button>
-              </div>
             ) : panel === 'state' && executionState ? (
               <ExecutionStatePanel
                 feed={executionState}
-                playheadMs={hasDesktopTimeline ? desktopCursorMs : (step.tSec ?? 0) * 1000}
+                playheadMs={desktopCursorMs}
                 onJump={jumpToExecutionState}
               />
+            ) : panel === 'state' ? (
+              <p className="text-sm text-zinc-500">No Planner or Observer state recorded for this trajectory.</p>
             ) : panel === 'analysis' ? (
-              <GradePanel grade={run.grade} failureReason={run.failureReason} verifierLog={verifierLog} />
+              <GradePanel grade={run.grade} failureReason={run.failureReason} verifierLog={verifierLog} passed={run.passed} />
             ) : panel === 'aft' ? (
               typeof task.metadata?.batch_id === 'string' && typeof task.metadata?.task_key === 'string' ? (
                 <BackendExecutionAnalysis

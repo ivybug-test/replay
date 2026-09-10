@@ -130,7 +130,7 @@ export function buildTourSteps(): TStep[] {
     {
       path: runAt(TOUR_STEPS.lost), sel: '[data-tour="aft-taxonomy"]', side: 'left', action: () => clickTab('aft'),
       title: 'AFT · the failure taxonomy',
-      body: 'Failures are coded on four axes — <b>A</b> = <i>stage</i> (where it broke), <b>B</b> = <i>root cause</i>, <b>C</b> = <i>behaviour</i> (the specific mistake), <b>D</b> = <i>impact</i>. Each mode below carries an <b>A×B×C×D</b> code. Click <b>“View taxonomy ↗”</b> (highlighted) any time to read what every code means.',
+      body: 'Failures are coded on four axes — <b>A</b> = <i>stage</i> (where it broke), <b>B</b> = <i>root cause</i>, <b>C</b> = <i>behaviour</i> (the specific mistake), <b>D</b> = <i>impact</i>. Each mode below carries an <b>A×B×C×D</b> code. Click <b>“View taxonomy ↗”</b> (highlighted) any time to read what every code means. This sample run uses the <b>browser-side</b> engine and the AFT v1.0 taxonomy; live OSS runs are audited by the backend Analyzer under <b>AFT reports</b> with the long-horizon harness taxonomy.',
     },
     {
       path: runAt(TOUR_STEPS.lost), sel: '[data-tour="aft-outcome"]', side: 'left',
@@ -145,7 +145,7 @@ export function buildTourSteps(): TStep[] {
     {
       path: runAt(), sel: '[data-tour="rail-content"]', side: 'left',
       title: 'Right rail · Label / Note', action: () => clickTab('labels'),
-      body: 'Finally, your own human review: mark steps correct / incorrect / unsure and add notes — to agree or disagree with the AFT audit. For Logged-in users these are saved; guests keep them in-browser. That’s the full tour!',
+      body: 'Finally, your own human review: mark steps correct / incorrect / unsure and add notes — to agree or disagree with the AFT audit. They live in this page session only (there is no server-side review store), so note anything you need to keep elsewhere. That’s the full tour!',
     },
   ]
 }

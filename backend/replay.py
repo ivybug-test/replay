@@ -272,7 +272,11 @@ class ReplayService:
                 harness['desktop_timeline'] = {'schema_version': 'desktop-timeline/v1', 'clock': 'episode_elapsed_ms',
                     'frames': [portable_frame(f) for f in frames], 'total_frames': len(frames),
                     'terminal': terminal, 'status': 'enabled' if frames else 'disabled', 'warnings': []}
-                if feed['events']:
+                if feed['events'] and not isinstance(
+                        extra.get('osworld_execution_state'), dict):
+                    # Synthesize the extension only for sources that shipped none
+                    # of their own. Rewriting a producer document from this feed
+                    # would silently drop the event types the feed does not model.
                     extra['osworld_execution_state'] = state_extension(feed)
             return {'trajectory': trajectory, 'records': records, 'work': work,
                     'frames': frames, 'state': feed, 'duration_ms': duration, 'terminal': terminal,

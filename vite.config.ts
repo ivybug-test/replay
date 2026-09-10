@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: process.env.REPLAY_BACKEND_URL ?? 'http://127.0.0.1:18767',
+        target: process.env.REPLAY_BACKEND_URL ?? 'http://127.0.0.1:18769',
         changeOrigin: true,
       },
     },

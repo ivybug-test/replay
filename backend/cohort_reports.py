@@ -11,7 +11,9 @@ from pathlib import Path
 from .services import ResourceNotFound
 
 MAX_REPORT_BYTES = 16 * 1024 * 1024
-SCHEMA_VERSION = "todolist-quality-cohort-report/v1"
+SCHEMA_V1 = "todolist-quality-cohort-report/v1"
+SCHEMA_V2 = "todolist-quality-task-report/v2"
+SCHEMA_VERSIONS = {SCHEMA_V1, SCHEMA_V2}
 ANALYSIS_TYPE = "todolist-quality"
 
 
@@ -40,17 +42,25 @@ class CohortReportStore:
 
     @staticmethod
     def _validated(document: dict, content: str, title: str, summary: str):
-        if document.get("schema_version") != SCHEMA_VERSION:
+        schema_version = document.get("schema_version")
+        if schema_version not in SCHEMA_VERSIONS:
             raise ValueError("unsupported cohort report schema")
         if document.get("analysis_type") != ANALYSIS_TYPE:
             raise ValueError("unsupported cohort analysis type")
         run_id, revision = document.get("run_id"), document.get("revision")
         if not isinstance(run_id, str) or not run_id or not isinstance(revision, int) or revision < 1:
             raise ValueError("cohort report run_id and positive revision are required")
-        if not isinstance(document.get("samples"), list) or not document["samples"]:
-            raise ValueError("cohort report samples are required")
-        if not isinstance(document.get("group_summary"), dict):
-            raise ValueError("cohort report group_summary is required")
+        if schema_version == SCHEMA_V1:
+            if not isinstance(document.get("samples"), list) or not document["samples"]:
+                raise ValueError("cohort report samples are required")
+            if not isinstance(document.get("group_summary"), dict):
+                raise ValueError("cohort report group_summary is required")
+        else:
+            dossiers = document.get("task_dossiers")
+            if not isinstance(dossiers, list) or not dossiers:
+                raise ValueError("task report dossiers are required")
+            if any(not isinstance(item, dict) or not item.get("task_id") for item in dossiers):
+                raise ValueError("every task report dossier requires a task_id")
         if not all(isinstance(value, str) and value.strip() for value in (content, title, summary)):
             raise ValueError("cohort report title, summary, and markdown are required")
         encoded = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

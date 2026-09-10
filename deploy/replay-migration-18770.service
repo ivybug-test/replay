@@ -11,7 +11,6 @@ Environment=NODE_ENV=production
 Environment=REPLAY_HOST=0.0.0.0
 Environment=REPLAY_PORT=18770
 Environment=REPLAY_BACKEND_URL=http://127.0.0.1:18769
-Environment=REPLAY_BACKEND_MODE=standalone
 Environment=REPLAY_STATIC_ROOT=dist-migration
 Restart=on-failure
 RestartSec=5s

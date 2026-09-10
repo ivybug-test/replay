@@ -12,17 +12,7 @@ import {
 } from '../lib/ossReplay'
 import { fmtScore } from '../lib/format'
 import { uniqueSortedTurnEvidence } from '../lib/analysisEvidence'
-
-const TERMINAL = new Set(['completed', 'completed_partial', 'failed', 'cancelled'])
-const visibleAnalysisModels = (models: AnalysisModel[]) => models.filter(
-  (item) => !/^gpt-6(?:$|[-.])/i.test(item.model),
-)
-const PHASE_LABELS: Record<string, string> = {
-  queued: '等待分析资源', preparing: '准备轨迹', 'turn-analysis': '逐 Turn 分析',
-  'evidence-collection': 'Analyzer 正在调用工具取证',
-  'taxonomy-and-report': '综合问题与 Taxonomy', 'finalizing-report': '生成报告',
-  completed: '分析完成', failed: '分析失败', cancelled: '分析取消',
-}
+import { isActiveJob, isStaleReport, isTerminalJob, jobPhaseLabel } from '../lib/analysisJobs'
 
 function reportContent(report: ExecutionAnalysisReport | null): string {
   return report?.content ?? report?.payload?.content ?? ''
@@ -462,7 +452,7 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
       if (controller.signal.aborted) return
       setState(next)
       setError(null)
-      if (next.job && !TERMINAL.has(next.job.status)) {
+      if (isActiveJob(next.job)) {
         timer = setTimeout(() => setRevision((value) => value + 1), 3000)
       }
     }).catch((reason) => {
@@ -475,7 +465,8 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
     const controller = new AbortController()
     fetchAnalysisModels(controller.signal).then(({ models: next }) => {
       if (controller.signal.aborted) return
-      const visible = visibleAnalysisModels(next)
+      // Which models the product offers is the backend's policy, published per entry.
+      const visible = next.filter((item) => !item.hidden)
       setModels(visible)
       setSelectedModel((current) => visible.some((item) => item.model === current)
         ? current : visible.find((item) => item.isDefault)?.model || visible[0]?.model || '')
@@ -499,11 +490,13 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
   const executionReport = taskExecutionReport(state?.report?.payload)
   const structured = nativeReport(state?.report?.payload)
   const job = state?.job
-  const jobActive = !!job && !TERMINAL.has(job.status)
-  const jobFailed = !!job && ['failed', 'cancelled'].includes(job.status)
+  const report = state?.report ?? null
+  const jobActive = isActiveJob(job)
+  const jobFailed = isTerminalJob(job) && !!job && ['failed', 'cancelled'].includes(job.status)
+  const reportStale = isStaleReport(report)
   const progress = job?.progress?.task_reports
   const progressPercent = job?.progress?.percent
-  const phaseKey = job?.progress?.phase ?? job?.stage ?? job?.status ?? 'queued'
+  const phaseLabel = jobPhaseLabel(job, '排队中')
 
   const start = async (force = false) => {
     setStarting(true)
@@ -523,12 +516,15 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-ink-900/70 p-2 text-[11px] text-zinc-600">
-          <span className="chip bg-emerald-500/10 text-emerald-300"><CheckCircle2 size={11} />{jobActive ? '已有报告' : '分析完成'}</span>
+          {reportStale
+            ? <span className="chip bg-amber-500/10 text-amber-300"><AlertTriangle size={11} />报告已过期</span>
+            : <span className="chip bg-emerald-500/10 text-emerald-300"><CheckCircle2 size={11} />{jobActive ? '已有报告' : '分析完成'}</span>}
+          {reportStale && <span className="text-zinc-500">当前 pipeline / taxonomy / evaluator 已变化，建议重新分析</span>}
           {jobActive && <span className="chip bg-accent/10 text-accent"><Activity size={11} className="animate-pulse" /> 正在更新</span>}
           {!jobActive && job?.status === 'completed' && <span className="chip bg-sky-500/10 text-sky-300">最近一次重新分析已完成</span>}
           {jobFailed && <span className="chip bg-rose-500/10 text-rose-300">重新分析失败</span>}
-          {reportModel(state?.report ?? null) && <span className="text-zinc-400">{reportModel(state?.report ?? null)}</span>}
-          {state?.report?.revision && <span>r{state.report.revision}</span>}
+          {reportModel(report) && <span className="text-zinc-400">{reportModel(report)}</span>}
+          {report?.revision && <span>r{report.revision}</span>}
           {!!evidence.length && <span>{evidence.length} 条证据</span>}
           {state?.oss_status && <span>OSS {state.oss_status}</span>}
           <select aria-label="AFT 重新分析模型" className="input ml-auto max-w-56 py-1 text-xs"
@@ -537,11 +533,11 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
             {models.map((item) => <option key={item.model} value={item.model}>{item.displayName}</option>)}
           </select>
           <button className="btn-secondary py-1 text-xs" disabled={starting || jobActive || !selectedModel}
-            onClick={() => void start(true)}><RotateCcw size={11} />{starting ? '正在启动…' : '重新分析'}</button>
+            onClick={() => void start(reportStale || jobFailed)}><RotateCcw size={11} />{starting ? '正在启动…' : '重新分析'}</button>
         </div>
         {jobActive && <div className="space-y-3 rounded-xl border border-accent/20 bg-accent/[0.035] p-4">
           <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-2 font-medium text-accent"><Activity size={12} className="animate-pulse" />{PHASE_LABELS[phaseKey] ?? phaseKey}</span>
+            <span className="flex items-center gap-2 font-medium text-accent"><Activity size={12} className="animate-pulse" />{phaseLabel}</span>
             {progressPercent != null ? <span className="tabular-nums text-zinc-500">{progressPercent}%</span> : job?.progress?.evidence_requests ? (
               <span className="text-zinc-500">{job.progress.evidence_requests} 次取证调用</span>
             ) : progress?.total ? <span className="text-zinc-500">{progress.completed ?? 0}/{progress.total} 份 Task 报告</span> : null}
@@ -576,7 +572,7 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
       {jobActive ? (
         <div className="space-y-3 rounded-xl border border-line bg-ink-950/70 p-4">
           <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-2 font-medium text-accent"><Activity size={12} className="animate-pulse" />{PHASE_LABELS[phaseKey] ?? phaseKey}</span>
+            <span className="flex items-center gap-2 font-medium text-accent"><Activity size={12} className="animate-pulse" />{phaseLabel}</span>
             {progressPercent != null ? <span className="tabular-nums text-zinc-500">{progressPercent}%</span> : job?.progress?.evidence_requests ? (
               <span className="text-zinc-500">{job.progress.evidence_requests} 次取证调用</span>
             ) : progress?.total ? <span className="text-zinc-500">{progress.completed ?? 0}/{progress.total} 份 Task 报告</span> : null}
@@ -616,7 +612,7 @@ export default function BackendExecutionAnalysis({ batchId, taskKey }: {
           </button>
         </div>
       )}
-      {job && TERMINAL.has(job.status) && !content && (
+      {job && isTerminalJob(job) && !content && (
         <p className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] px-3 py-2 text-xs text-amber-300">
           分析以 {job.status} 结束，尚未生成可复用报告。{job.error?.message && <> 原因：{job.error.message}。</>} 可在上方更换模型后重新分析。
         </p>

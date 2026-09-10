@@ -16,7 +16,7 @@ try {
     if (response.url().includes('/api/') && response.status() >= 500) failures.push(`${new URL(response.url()).pathname}: ${response.status()}`)
   })
   const health = await (await page.request.get(`${base}/api/health`)).json()
-  assert.deepEqual(health.services_configured, { catalog: true, replay: true, analysis: true })
+  assert.deepEqual(health.services_configured, { catalog: true, replay: true, analysis: true, cohorts: true })
   await page.goto(`${base}/overview`)
   await page.getByRole('heading', { name: 'OSWorld model leaderboard' }).waitFor()
   await page.locator('table tbody tr').first().waitFor()

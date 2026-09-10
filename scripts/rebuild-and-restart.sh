@@ -10,13 +10,19 @@ BASE_URL="http://127.0.0.1:18768"
 cd "${PROJECT_ROOT}"
 npm ci
 npm run lint
-VITE_REPLAY_BACKEND_MODE=standalone ./node_modules/.bin/vite build
+# One build mode: the frontend always consumes backend-normalized ATIF.
+./node_modules/.bin/vite build
 
 systemd-analyze --user verify "${UNIT_FILE}" "${PROJECT_ROOT}/deploy/replay-backend-18769.service"
-USER_UNIT="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user/${SERVICE}"
-if [[ ! -e "${USER_UNIT}" ]]; then
-  systemctl --user link "${UNIT_FILE}" >/dev/null
-fi
+# Install both units on every deploy instead of linking only when absent, so a
+# unit change in the repository reaches the host. Remove the destination first:
+# install(1) would otherwise write through a symlink left by an older setup.
+USER_UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+mkdir -p "${USER_UNIT_DIR}"
+for unit in "${SERVICE}" replay-backend-18769.service; do
+  rm -f "${USER_UNIT_DIR}/${unit}"
+  install -m 0644 "${PROJECT_ROOT}/deploy/${unit}" "${USER_UNIT_DIR}/${unit}"
+done
 systemctl --user daemon-reload
 systemctl --user enable replay-backend-18769.service "${SERVICE}" >/dev/null
 # Codex analysis workers need the same outbound network path as the deploy

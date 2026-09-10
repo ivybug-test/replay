@@ -9,8 +9,7 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const staticRoot = path.resolve(projectRoot, process.env.REPLAY_STATIC_ROOT || 'dist')
 const host = process.env.REPLAY_HOST || '0.0.0.0'
 const port = Number(process.env.REPLAY_PORT || '18768')
-const backend = new URL(process.env.REPLAY_BACKEND_URL || 'http://127.0.0.1:18767')
-const standalone = process.env.REPLAY_BACKEND_MODE === 'standalone'
+const backend = new URL(process.env.REPLAY_BACKEND_URL || 'http://127.0.0.1:18769')
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error(`Invalid REPLAY_PORT: ${process.env.REPLAY_PORT}`)
@@ -42,10 +41,6 @@ function sendText(response, status, text, contentType = 'text/plain; charset=utf
     'cache-control': 'no-store',
   })
   response.end(body)
-}
-
-function sendJson(response, status, value) {
-  sendText(response, status, `${JSON.stringify(value)}\n`, 'application/json; charset=utf-8')
 }
 
 async function resolveStaticFile(pathname) {
@@ -95,23 +90,6 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || '/', 'http://replay.local')
   if (url.pathname === '/healthz') {
     sendText(response, 200, 'ok\n')
-    return
-  }
-  if (!standalone && url.pathname === '/api/atif-live') {
-    if (request.method !== 'GET') {
-      sendJson(response, 405, { error: 'Method not allowed' })
-      return
-    }
-    try {
-      const after = Number(url.searchParams.get('after') || '0')
-      const { readAtifLive } = await import('./server/atifLive.mjs')
-      const result = await readAtifLive(
-        url.searchParams.get('run'), url.searchParams.get('task'), after,
-      )
-      sendJson(response, result.status, result.body)
-    } catch (error) {
-      sendJson(response, 502, { error: 'ATIF live stream unavailable', detail: error.message })
-    }
     return
   }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {

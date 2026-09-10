@@ -1,11 +1,12 @@
 import { atifTrajectoryToSteps } from './atifToViewer'
+import { hohEvents } from './hohState'
+import { modelFamily } from './modelFamily'
 import { observerEvents, plannerEvents } from './observerFeed'
 import { parseAtifTrajectory, type AtifTrajectory } from './atif'
 import {
   atifLiveToTrajectory, mergeAtifLiveSnapshot,
   type AtifLiveSnapshot, type AtifLiveStream,
 } from './atifLive'
-import { legacyTraceToAtif, type LegacyEpisodeWork } from './legacyTraceToAtif'
 import { parseOsworldAtifExtensions } from './osworldAtifExtra'
 import type { Agent, Run, RunStatus, Task, Vendor } from './types'
 
@@ -31,6 +32,12 @@ export interface TaskSummary {
   finished_at?: string | null
   agent_outcome?: string | null
   evaluation_status?: string | null
+  /** Normalized by the backend from the batch configuration and batch-config.json. */
+  model?: string | null
+  framework?: string | null
+  /** Published by the backend; absent on a backend that predates it. */
+  terminal?: boolean
+  passed?: boolean | null
 }
 
 export interface BatchDocument {
@@ -64,15 +71,13 @@ export interface DesktopFrame {
   url: string
 }
 
-export type ExecutionStateKind =
-  | 'declaration' | 'goal' | 'action' | 'checkpoint'
-  | 'attempt' | 'evidence' | 'failure' | 'recovery' | 'observer' | 'planner'
+export type ExecutionStateKind = 'observer' | 'planner' | 'hoh'
 
 export interface ExecutionStateEvent {
   sequence: number
   episode_elapsed_ms: number
   time?: string | null
-  event: `execution_state_${ExecutionStateKind}` | 'observer_interval' | 'planner_state'
+  event: 'observer_interval' | 'planner_state' | 'hoh_state'
   version?: string
   status?: string
   transition?: string
@@ -84,6 +89,12 @@ export interface ExecutionStateEvent {
   [key: string]: unknown
 }
 
+/**
+ * The State panel's single feed, folded from the trajectory's Harness extension
+ * by observerFeed/plannerState/hohState. The backend's legacy
+ * `/api/execution-state` document is a different, unsupported shape here: it can
+ * never carry these three event types.
+ */
 export interface ExecutionStateFeed {
   version: string
   counts: Partial<Record<ExecutionStateKind, number>>
@@ -97,7 +108,6 @@ export interface ExecutionStateFeed {
 
 const apiBase = String(import.meta.env.VITE_REPLAY_API_BASE ?? '').replace(/\/$/, '')
 const atifLiveCache = new Map<string, AtifLiveSnapshot>()
-export const standaloneBackend = import.meta.env.VITE_REPLAY_BACKEND_MODE === 'standalone'
 
 export interface ExecutionSummary {
   batch_id: string
@@ -179,6 +189,9 @@ export interface ExecutionAnalysisReport {
   content_format?: string
   created_at?: string
   evidence?: unknown[]
+  /** The backend's verdict on whether this revision is still valid. */
+  current?: boolean
+  pipeline_version?: string
   payload?: {
     schema_version?: string
     content?: string
@@ -193,6 +206,10 @@ export interface AnalysisJob {
   job_id: string
   status: string
   stage?: string
+  /** Terminal statuses are the backend's vocabulary, published per job. */
+  terminal?: boolean
+  phase?: string
+  phase_label?: string
   error?: { message?: string } | null
   model?: string
   progress?: {
@@ -224,6 +241,8 @@ export interface AnalysisModel {
   displayName: string
   description: string
   isDefault: boolean
+  /** Product-visibility policy is the backend's; hidden entries stay selectable by name. */
+  hidden?: boolean
   defaultReasoningEffort?: string | null
   supportedReasoningEfforts?: Array<{ reasoningEffort: string; description?: string }>
   inputModalities?: string[]
@@ -237,6 +256,8 @@ export interface AftRunReportSummary {
   taxonomy_version: string
   created_at: string
   job_status?: string | null
+  /** true = still valid, false = known stale, null = could not be decided. */
+  current?: boolean | null
 }
 
 export interface AftRunStatus {
@@ -363,15 +384,19 @@ export function fetchAftRunStatuses(signal?: AbortSignal) {
   return getJson<{ runs: Record<string, AftRunStatus> }>('/api/run-analysis-statuses', signal)
 }
 
+export interface RunAnalysisState {
+  run_id: string
+  job: AnalysisJob | null
+  report: AftRunReport | null
+}
+
 export function fetchRunAnalysis(batchId: string, signal?: AbortSignal) {
   const query = new URLSearchParams({ run: batchId })
-  return getJson<{ run_id: string; job: AnalysisJob | null; report: AftRunReportSummary | null }>(
-    `/api/run-analysis?${query}`, signal,
-  )
+  return getJson<RunAnalysisState>(`/api/run-analysis?${query}`, signal)
 }
 
 export function startRunAnalysis(batchId: string, model?: string, signal?: AbortSignal, force = false) {
-  return postJson<{ run_id: string; job: AnalysisJob | null; report: AftRunReportSummary | null }>(
+  return postJson<RunAnalysisState>(
     '/api/run-analysis', { run: batchId, ...(model ? { model } : {}), ...(force ? { force: true } : {}) }, signal,
   )
 }
@@ -436,29 +461,24 @@ export async function fetchViewerBundle(
     getOptionalJson<AtifTrajectory>(`/api/trajectory?${query}`, signal).then(async (terminalTrajectory) => {
       if (terminalTrajectory) {
         atifLiveCache.delete(`${batchId}/${taskKey}`)
-        return { trajectory: terminalTrajectory, work: null, hasMore: false }
+        return { trajectory: terminalTrajectory, hasMore: false }
       }
-      let liveError: unknown
       try {
         const live = await getAtifLive(batchId, taskKey, query, signal)
         const trajectory = live ? atifLiveToTrajectory(live) : null
-        if (trajectory) return { trajectory, work: null, hasMore: Boolean(live?.has_more) }
+        if (trajectory) return { trajectory, hasMore: Boolean(live?.has_more) }
       } catch (error) {
         if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
-        liveError = error
-        // A broken live manifest must not prevent reading the legacy trace.
-        // Start fresh on the next refresh so a recovered stream can take over.
+        // A broken live manifest must not stay cached as a usable snapshot:
+        // start fresh on the next refresh so a recovered stream can take over.
         atifLiveCache.delete(`${batchId}/${taskKey}`)
+        throw error
       }
-      if (standaloneBackend) {
-        if (liveError) throw liveError
-        throw new Error('No trajectory steps are available yet. Retrying…')
-      }
-      const work = await getJson<LegacyEpisodeWork>(`/api/agent-work?${query}&center_ms=-1`, signal)
-      if (liveError && !work.items.length) {
-        throw new Error(`Live trajectory could not be loaded (${String(liveError)}), and no legacy steps are available. Retrying…`)
-      }
-      return { trajectory: null, work, hasMore: false }
+      // Neither source exists yet. The backend converts an old-format trace
+      // into ATIF itself, so waiting is the only remaining state: reading
+      // /api/agent-work here would render a second representation of the same
+      // execution that the rest of the viewer does not use.
+      throw new Error('No trajectory steps are available yet. Retrying…')
     }),
   ])
   const taskSummary = batch.tasks.find((task) => task.key === taskKey)
@@ -466,27 +486,13 @@ export async function fetchViewerBundle(
   // Native trajectories and live ATIF pages carry their desktop timeline in
   // the harness extension. Do not block first paint on /window, which must
   // scan the complete history of a long-running stream.
-  return { ...toViewerBundle(batch, taskSummary, source.work, source.trajectory, []),
+  return { ...toViewerBundle(batch, taskSummary, source.trajectory, []),
     hasMore: source.hasMore }
-}
-
-export async function fetchExecutionState(
-  batchId: string,
-  taskKey: string,
-  signal?: AbortSignal,
-): Promise<ExecutionStateFeed> {
-  const query = new URLSearchParams({ run: batchId, task: taskKey })
-  return getJson<ExecutionStateFeed>(`/api/execution-state?${query}`, signal)
 }
 
 export function frameUrl(batchId: string, taskKey: string, frameIndex: number): string {
   const query = new URLSearchParams({ run: batchId, task: taskKey, frame: String(frameIndex) })
   return apiPath(`/api/frame?${query}`)
-}
-
-function modelImageUrl(batchId: string, taskKey: string, image: { path: string; sha256: string }): string {
-  const query = new URLSearchParams({ run: batchId, task: taskKey, path: image.path, sha256: image.sha256 })
-  return apiPath(`/api/model-image?${query}`)
 }
 
 function atifMediaUrl(batchId: string, taskKey: string, path: string): string {
@@ -514,33 +520,28 @@ function durationSeconds(task: TaskSummary, fallbackMs: number): number {
 function toViewerBundle(
   batch: BatchDocument,
   taskSummary: TaskSummary,
-  work: LegacyEpisodeWork | null,
-  nativeTrajectory: AtifTrajectory | null,
+  nativeTrajectory: AtifTrajectory,
   frames: TimelineStamp[],
 ): ViewerBundle {
   const configuration = batch.configuration ?? {}
-  const native = nativeTrajectory ? parseAtifTrajectory(nativeTrajectory, true) : null
-  const legacyAgentLabel = work?.agents.map((agent) => agent.label).join(', ')
-  const agentLabel = native?.agent.name ?? (legacyAgentLabel || String(configuration.orchestration ?? 'agent'))
-  const runtime = String(native?.agent.model_name ?? configuration.runtime_name ?? configuration.model ?? agentLabel)
+  const trajectory = parseAtifTrajectory(nativeTrajectory, true)
+  // Attribution follows the backend's normalized summary first: it merges the
+  // batch configuration with batch-config.json, which the browser never sees.
+  const agentLabel = trajectory.agent.name
+  const harness = String(taskSummary.framework
+    ?? configuration.orchestration ?? agentLabel ?? 'agent')
+  const runtime = String(trajectory.agent.model_name
+    ?? taskSummary.model ?? configuration.runtime_name ?? configuration.model ?? agentLabel)
   const taskId = `oss-${batch.batch_id}-${taskSummary.key}`
   const runId = `${taskId}-run`
   const agentId = `${taskId}-agent`
-  const trajectory = native ?? (work?.items.length ? legacyTraceToAtif(work, {
-    sessionId: `${batch.batch_id}/${taskSummary.key}`,
-    trajectoryId: `${batch.batch_id}/${taskSummary.key}/root`,
-    agentName: String(configuration.orchestration ?? agentLabel),
-    agentVersion: typeof configuration.agent_version === 'string' ? configuration.agent_version : 'unknown',
-    modelName: runtime,
-    imageUrl: (image) => modelImageUrl(batch.batch_id, taskSummary.key, image),
-  }) : null)
-  const extensions = trajectory ? parseOsworldAtifExtensions(trajectory) : {}
-  const steps = trajectory ? atifTrajectoryToSteps(trajectory, {
+  const extensions = parseOsworldAtifExtensions(trajectory)
+  const steps = atifTrajectoryToSteps(trajectory, {
     requireV18: true,
     resolveImage: (source) => /^(data:|blob:|https?:|\/api\/)/.test(source.path)
       ? source.path
       : atifMediaUrl(batch.batch_id, taskSummary.key, source.path),
-  }) : []
+  })
   const sidecarDesktopTimeline = frames
     .filter((frame): frame is TimelineStamp & { frame_index: number } => typeof frame.frame_index === 'number')
     .map((frame) => ({
@@ -565,7 +566,7 @@ function toViewerBundle(
   const completionTokens = steps.reduce((sum, step) => sum + (step.tokens?.completion ?? 0), 0)
   const traceDurationMs = typeof extensions.harness?.run?.duration_ms === 'number'
     ? extensions.harness.run.duration_ms
-    : work?.duration_ms ?? Math.max(0, ...steps.map((step) => (step.endSec ?? step.tSec ?? 0) * 1000))
+    : Math.max(0, ...steps.map((step) => (step.endSec ?? step.tSec ?? 0) * 1000))
 
   const vendor: Vendor = {
     id: 'oss-replay',
@@ -574,9 +575,9 @@ function toViewerBundle(
   }
   const agent: Agent = {
     id: agentId,
-    harness: String(configuration.orchestration ?? agentLabel),
+    harness,
     model: runtime,
-    family: /qwen/i.test(runtime) ? 'Alibaba' : /gpt|codex|openai/i.test(runtime) ? 'OpenAI' : 'unknown',
+    family: modelFamily(runtime),
     vendorId: vendor.id,
   }
   const task: Task = {
@@ -593,12 +594,17 @@ function toViewerBundle(
       task_key: taskSummary.key,
       task_id: taskSummary.task_id,
       execution_status: taskSummary.status,
+      // Whether polling should stop is the backend's call, not a status-name guess.
+      execution_terminal: taskSummary.terminal ?? null,
       evaluation_status: taskSummary.evaluation_status,
       agent_outcome: taskSummary.agent_outcome,
-      agents: work?.agents ?? [{ id: native?.trajectory_id ?? 'agent', label: native?.agent.name ?? agentLabel }],
+      agents: [{ id: trajectory.trajectory_id ?? 'agent', label: agentLabel }],
     },
   }
   const score = typeof taskSummary.score === 'number' ? taskSummary.score : null
+  // The backend owns the pass verdict; the local threshold only covers a
+  // backend that predates the field.
+  const passed = taskSummary.passed ?? (score != null && score >= 0.999)
   const run: Run = {
     id: runId,
     taskId,
@@ -606,7 +612,7 @@ function toViewerBundle(
     vendorId: vendor.id,
     format: 'atif',
     status: toRunStatus(taskSummary),
-    passed: score != null && score >= 0.999,
+    passed,
     reward: score,
     steps,
     stepCount: steps.length,
@@ -624,11 +630,12 @@ function toViewerBundle(
   }
   const reports = trajectory ? observerEvents(trajectory) : []
   const planUpdates = trajectory ? plannerEvents(trajectory) : []
-  const stateEvents = [...planUpdates, ...reports]
+  const stateEvents = [...planUpdates, ...reports, ...(trajectory ? hohEvents(trajectory) : [])]
     .sort((a, b) => a.episode_elapsed_ms - b.episode_elapsed_ms || a.sequence - b.sequence)
   const executionState: ExecutionStateFeed | undefined = trajectory ? {
     version: 'harness-state/v1', source: 'trajectory_extra',
-    duration_ms: traceDurationMs, terminal: taskSummary.status !== 'running',
+    duration_ms: traceDurationMs,
+    terminal: taskSummary.terminal ?? (taskSummary.status !== 'running'),
     task_status: taskSummary.status,
     counts: { observer: reports.length, planner: planUpdates.length }, events: stateEvents,
   } : undefined

@@ -21,3 +21,16 @@ export function osworldCapabilities(task: { metadata?: Record<string, unknown> }
     ? capabilities.filter((value): value is string => typeof value === 'string')
     : []
 }
+
+/**
+ * The three-digit OSWorld task ID the OSS backend keys on.
+ *
+ * The catalog importer publishes it as `metadata.osworld_task_id`; the prefix
+ * fallback only covers catalogs imported before that field existed.
+ */
+export function osworldTaskId(task: { id: string; metadata?: Record<string, unknown> }): string {
+  const published = task.metadata?.osworld_task_id
+  return typeof published === 'string' && published
+    ? published
+    : task.id.replace(/^osworld-v2-/, '')
+}

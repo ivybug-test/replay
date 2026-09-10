@@ -23,7 +23,8 @@ from .aft_taxonomy import TAXONOMY_VERSION
 from .codex import CodexCancelled, CodexError, CodexRunner
 from .evaluator_source import evaluator_source_summary, load_evaluator_source
 from .metadata import TERMINAL, execution_summary
-from .oss_io.client import OssObjectTooLarge
+from .metadata import task_id as normalize_task_id
+from .oss_io.client import OssObjectTooLarge, OssProtocolError
 from .services import InvalidQuery, ResourceNotFound, ServiceUnavailable
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,30 @@ RUN_PIPELINE_VERSION = 'run-task-first-analysis/1.0.0'
 RUN_ANALYSIS_VERSION = 'run-common-problem-analysis/1.0.0'
 TASK_ANALYSIS_TARGET_SECONDS = 120
 RUN_ANALYSIS_TARGET_SECONDS = 900
+
+# The progress machine is defined once, with the label each phase shows. Jobs
+# publish both, so callers never keep their own copy of this vocabulary.
+JOB_PHASES = {
+    'queued': '等待分析资源',
+    'preparing': '准备轨迹',
+    'evidence-collection': 'Agentic 取证',
+    'finalizing-report': '生成报告',
+    'task-analysis': '逐任务并行分析',
+    'common-problem-synthesis': '归纳跨任务共性问题',
+    'completed': '分析完成',
+    'failed': '分析失败',
+    'cancelled': '分析取消',
+}
+
+# Models the product does not offer in its own pickers. They stay addressable by
+# name so an existing report can be re-analysed with the model that produced it.
+HIDDEN_MODELS = re.compile(r'gpt-6($|[-.])', re.IGNORECASE)
+
+
+def _progress(phase: str, **fields) -> dict:
+    if phase not in JOB_PHASES:
+        raise ValueError(f'Unknown analysis phase: {phase}')
+    return {'phase': phase, **fields}
 
 
 def _strict_object(properties: dict, required: list[str] | None = None) -> dict:
@@ -157,6 +182,7 @@ def _retryable_codex_error(exc: CodexError) -> bool:
         'unavailable', 'closed unexpectedly', 'connection',
         'did not return valid json', 'returned no final message',
         'skipped required evidence',
+        'unknown turn ids', 'unknown agent trajectory',
     ))
 
 
@@ -371,9 +397,16 @@ class ExecutionAnalysisService:
 
     def models(self):
         try:
-            return self.codex.models()
+            catalog = self.codex.models()
         except CodexError as exc:
             raise ServiceUnavailable('Codex model catalog is unavailable') from exc
+        # The catalog belongs to Codex; which entries the product offers is
+        # decided here. Hidden entries stay selectable by name so a report can
+        # always be re-analysed with the model that produced it.
+        return {'models': [
+            {**item, 'hidden': bool(HIDDEN_MODELS.match(item['model']))}
+            for item in catalog['models']
+        ]}
 
     def _validate_model(self, model: str | None):
         models = self.models()['models']
@@ -412,6 +445,45 @@ class ExecutionAnalysisService:
             .get('report_id') == item.get('task_report_id')
             for item in report_tasks
         )
+
+    @staticmethod
+    def _terminal_task_keys(batch) -> set[str]:
+        return {item.get('key') for item in batch.get('tasks') or []
+                if item.get('status') in TERMINAL and item.get('key')}
+
+    @staticmethod
+    def _batch_task_id(entry):
+        """Read a batch task id the way execution_summary normalizes it."""
+        try:
+            return normalize_task_id(entry.get('task_id'))
+        except OssProtocolError:
+            return None
+
+    def _stored_task_report_current(self, report, task_id) -> bool:
+        """Whether a stored report is still valid for the model that made it.
+
+        Callers use this to show staleness instead of assuming any report on
+        disk is current. `start` answers the different question of whether an
+        existing report already satisfies a newly requested model.
+        """
+        if not report:
+            return False
+        evaluator = load_evaluator_source(self.evaluator_source_root, task_id)
+        return self._current_task_report(report, report['model'], evaluator.get('digest'))
+
+    def _stored_run_report_current(self, report, task_keys=None):
+        """Report freshness as a tri-state; None means it could not be decided.
+
+        List endpoints pass no task keys, which skips the run-composition check
+        so a listing never has to read OSS batches.
+        """
+        if not report:
+            return False
+        try:
+            return self._current_run_report(report, report['model'], task_keys)
+        except Exception:
+            logger.warning('Could not evaluate run report freshness', exc_info=True)
+            return None
 
     def _execution_summary(self, run: str, task: str):
         batch = self.catalog.reader.batch(run)
@@ -457,8 +529,11 @@ class ExecutionAnalysisService:
         if not job:
             return None
         progress = job.get('progress') or {}
+        phase = progress.get('phase') or job['status']
         return {
             'job_id': job['job_id'], 'status': job['status'], 'stage': job['status'],
+            'terminal': job['status'] in TERMINAL_JOBS,
+            'phase': phase, 'phase_label': JOB_PHASES.get(phase, phase),
             'model': job['model'], 'error': ({'message': job['error']} if job.get('error') else None),
             'progress': {**progress, 'task_reports': {
                 'completed': progress.get('completed', 0), 'total': progress.get('total', 0),
@@ -506,7 +581,7 @@ class ExecutionAnalysisService:
             issue['supporting_sources'] = supporting
         return value
 
-    def _public_task_report(self, report):
+    def _public_task_report(self, report, *, current: bool = False):
         if not report:
             return None
         raw_document = report['document']
@@ -519,15 +594,19 @@ class ExecutionAnalysisService:
             'model': report['model'], 'content': report['content'], 'content_format': 'markdown',
             'created_at': report['created_at'], 'evidence': evidence,
             'payload': document, 'taxonomy_version': report['taxonomy_version'],
+            'pipeline_version': document.get('pipeline_version'), 'current': current,
         }
 
     def state(self, *, run: str, task: str):
         batch = self.catalog.reader.batch(run)
-        if not any(item.get('key') == task for item in batch['tasks']):
+        entry = next((item for item in batch['tasks'] if item.get('key') == task), None)
+        if entry is None:
             raise ResourceNotFound('Execution is not present in batch')
+        report = self.store.latest_task_report(run, task)
         return {
             'run_id': run, 'task_key': task,
-            'report': self._public_task_report(self.store.latest_task_report(run, task)),
+            'report': self._public_task_report(report, current=self._stored_task_report_current(
+                report, self._batch_task_id(entry))),
             'report_origin': 'backend-native', 'oss_status': None,
             'job': self._public_job(self.store.latest_job('task', run, task)),
         }
@@ -564,19 +643,17 @@ class ExecutionAnalysisService:
     def _execute_task_job(self, job_id, *, reuse_cache: bool = True):
         job = self.store.job(job_id)
         try:
-            self.store.update_job(job_id, 'running', progress={
-                'completed': 0, 'total': 1, 'running': 1, 'failed': 0,
-                'phase': 'preparing', 'percent': 5,
-            })
+            self.store.update_job(job_id, 'running', progress=_progress(
+                'preparing', completed=0, total=1, running=1, failed=0, percent=5,
+            ))
             report = self._analyze_task(
                 job['run_id'], job['task_key'], job['model'], job_id=job_id,
                 reuse_cache=reuse_cache,
             )
-            self.store.update_job(job_id, 'completed', progress={
-                'completed': 1, 'total': 1, 'running': 0, 'failed': 0,
-                'phase': 'completed', 'percent': 100,
-                'report_id': report['report_id'],
-            })
+            self.store.update_job(job_id, 'completed', progress=_progress(
+                'completed', completed=1, total=1, running=0, failed=0, percent=100,
+                report_id=report['report_id'],
+            ))
         except Exception as exc:
             logger.error('AFT task job failed: %s: %s', type(exc).__name__, exc)
             current = self.store.job(job_id) or {}
@@ -669,22 +746,21 @@ class ExecutionAnalysisService:
             count('cache_hits')
         if not isinstance(synthesis, dict):
             if progress_callback:
-                progress_callback({'phase': 'evidence-collection', 'completed': 0,
-                                   'total': trace['turn_count']})
+                progress_callback(_progress('evidence-collection', completed=0,
+                                            total=trace['turn_count']))
             if job_id:
-                self.store.update_job(job_id, 'analyzing', progress={
-                    'completed': 0, 'total': 1, 'running': 1, 'failed': 0,
-                    'phase': 'evidence-collection', 'evidence_requests': 0, 'percent': 10,
-                })
+                self.store.update_job(job_id, 'analyzing', progress=_progress(
+                    'evidence-collection', completed=0, total=1, running=1, failed=0,
+                    evidence_requests=0, percent=10,
+                ))
 
             def on_tool_call(_audit):
                 calls = len(tool_audit)
                 if job_id:
-                    self.store.update_job(job_id, 'analyzing', progress={
-                        'completed': 0, 'total': 1, 'running': 1, 'failed': 0,
-                        'phase': 'evidence-collection', 'evidence_requests': calls,
-                        'percent': min(82, 10 + calls * 3),
-                    })
+                    self.store.update_job(job_id, 'analyzing', progress=_progress(
+                        'evidence-collection', completed=0, total=1, running=1, failed=0,
+                        evidence_requests=calls, percent=min(82, 10 + calls * 3),
+                    ))
 
             active_prompt = prompt
             for attempt in range(2):
@@ -719,11 +795,10 @@ class ExecutionAnalysisService:
                 payload={'result': synthesis, 'tool_audit': tool_audit},
             )
         if job_id:
-            self.store.update_job(job_id, 'synthesizing', progress={
-                'completed': 0, 'total': 1, 'running': 1, 'failed': 0,
-                'phase': 'finalizing-report', 'evidence_requests': len(tool_audit),
-                'percent': 92,
-            })
+            self.store.update_job(job_id, 'synthesizing', progress=_progress(
+                'finalizing-report', completed=0, total=1, running=1, failed=0,
+                evidence_requests=len(tool_audit), percent=92,
+            ))
         turn_map = {item['turn_id']: item for item in trace['turns']}
         turn_by_number = {item['global_turn']: item for item in trace['turns']}
 
@@ -996,10 +1071,18 @@ class ExecutionAnalysisService:
                 )
 
     def run_state(self, *, run: str):
-        self.catalog.reader.batch(run)
+        batch = self.catalog.reader.batch(run)
         job = self.store.latest_job('run', run)
         report = self.store.latest_run_report(run)
-        return {'run_id': run, 'job': self._public_job(job), 'report': report}
+        return {'run_id': run, 'job': self._public_job(job), 'report': self._public_run_report(
+            report, self._terminal_task_keys(batch),
+        )}
+
+    def _public_run_report(self, report, task_keys=None):
+        if not report:
+            return None
+        return {**report,
+                'current': self._stored_run_report_current(report, task_keys)}
 
     def start_run(self, *, run: str, model: str | None = None, force: bool = False):
         batch = self.catalog.reader.batch(run)
@@ -1025,10 +1108,10 @@ class ExecutionAnalysisService:
         try:
             batch = self.catalog.get_batch(run=run)
             tasks = [item for item in batch['tasks'] if item.get('status') in TERMINAL]
-            self.store.update_job(job_id, 'running', progress={
-                'completed': 0, 'total': len(tasks), 'running': len(tasks), 'failed': 0,
-                'reused': 0, 'phase': 'task-analysis', 'percent': 2,
-            })
+            self.store.update_job(job_id, 'running', progress=_progress(
+                'task-analysis', completed=0, total=len(tasks), running=len(tasks),
+                failed=0, reused=0, percent=2,
+            ))
             results_by_key: dict[str, dict] = {}
 
             def ensure_task_report(task: dict) -> dict:
@@ -1068,13 +1151,13 @@ class ExecutionAnalysisService:
                                  for item in results_by_key.values())
                     reused = sum(item['analysis_status'] == 'reused'
                                  for item in results_by_key.values())
-                    self.store.update_job(job_id, 'running', progress={
-                        'completed': completed, 'total': len(tasks),
-                        'running': len(tasks) - len(results_by_key), 'failed': failed,
-                        'reused': reused, 'phase': 'task-analysis',
-                        'percent': min(72, 2 + round(70 * len(results_by_key)
-                                                   / max(1, len(tasks)))),
-                    })
+                    self.store.update_job(job_id, 'running', progress=_progress(
+                        'task-analysis', completed=completed, total=len(tasks),
+                        running=len(tasks) - len(results_by_key), failed=failed,
+                        reused=reused,
+                        percent=min(72, 2 + round(70 * len(results_by_key)
+                                                  / max(1, len(tasks)))),
+                    ))
 
             task_results = [results_by_key[task['task_key']] for task in tasks]
             completed_results = [item for item in task_results if item.get('report')]
@@ -1088,25 +1171,23 @@ class ExecutionAnalysisService:
                 tools, handler, evidence_state = self._run_aggregation_tools(
                     completed_results, taxonomy,
                 )
-                self.store.update_job(job_id, 'synthesizing', progress={
-                    'completed': len(completed_results), 'total': len(tasks),
-                    'running': 1, 'failed': failed_count,
-                    'reused': sum(item['analysis_status'] == 'reused'
-                                  for item in completed_results),
-                    'phase': 'common-problem-synthesis', 'percent': 75,
-                })
+                self.store.update_job(job_id, 'synthesizing', progress=_progress(
+                    'common-problem-synthesis', completed=len(completed_results),
+                    total=len(tasks), running=1, failed=failed_count,
+                    reused=sum(item['analysis_status'] == 'reused'
+                               for item in completed_results),
+                    percent=75,
+                ))
 
                 def on_tool_call(_audit):
                     covered = len(evidence_state['tasks_read'])
-                    self.store.update_job(job_id, 'synthesizing', progress={
-                        'completed': len(completed_results), 'total': len(tasks),
-                        'running': 1, 'failed': failed_count,
-                        'phase': 'common-problem-synthesis',
-                        'evidence_requests': len(audit),
-                        'task_analyses_read': covered,
-                        'percent': min(96, 76 + round(18 * covered
-                                                     / max(1, len(completed_results)))),
-                    })
+                    self.store.update_job(job_id, 'synthesizing', progress=_progress(
+                        'common-problem-synthesis', completed=len(completed_results),
+                        total=len(tasks), running=1, failed=failed_count,
+                        evidence_requests=len(audit), task_analyses_read=covered,
+                        percent=min(96, 76 + round(18 * covered
+                                                   / max(1, len(completed_results)))),
+                    ))
 
                 prompt = f"""使用随请求提供的 run-common-problem-analysis Skill，聚合 Run `{run}` 的 {len(completed_results)} 份单任务报告。
 
@@ -1163,11 +1244,11 @@ evidence_summary 必须复述对应单任务报告里的具体表现，issue_tit
             )
             report = self.store.save_run_report(run, model, self._run_markdown(document), document)
             terminal_status = 'completed_partial' if failed_count else 'completed'
-            self.store.update_job(job_id, terminal_status, progress={
-                'completed': len(completed_results), 'total': len(tasks), 'running': 0,
-                'failed': failed_count, 'report_id': report['report_id'],
-                'phase': 'completed', 'percent': 100,
-            })
+            self.store.update_job(job_id, terminal_status, progress=_progress(
+                'completed', completed=len(completed_results), total=len(tasks),
+                running=0, failed=failed_count, report_id=report['report_id'],
+                percent=100,
+            ))
         except Exception as exc:
             logger.error('AFT run job failed: %s', type(exc).__name__)
             self.store.update_job(job_id, 'failed', error=f'{type(exc).__name__}: {exc}'[:1000])
@@ -1392,11 +1473,20 @@ evidence_summary 必须复述对应单任务报告里的具体表现，issue_tit
             ) latest ON latest.run_id=j.run_id AND latest.created_at=j.created_at''').fetchall()
         jobs = {row['run_id']: self.store._decode(row) for row in rows}
         return {'runs': {run: {
-            'job': self._public_job(jobs.get(run)), 'report': reports.get(run),
+            'job': self._public_job(jobs.get(run)),
+            'report': self._report_summary(reports.get(run)),
         } for run in set(jobs) | set(reports)}}
 
+    def _report_summary(self, summary):
+        """Add report freshness to a listing row without reading OSS batches."""
+        if not summary:
+            return None
+        return {**summary, 'current': self._stored_run_report_current(
+            self.store.latest_run_report(summary['run_id']))}
+
     def reports(self):
-        return {'reports': self.store.list_run_reports()}
+        return {'reports': [self._report_summary(item)
+                            for item in self.store.list_run_reports()]}
 
     def taxonomy(self):
         return self.store.taxonomy()
@@ -1416,6 +1506,7 @@ evidence_summary 必须复述对应单任务报告里的具体表现，issue_tit
         latest['document'] = self._enrich_research_basis(latest['document'])
         if latest['document'].get('schema_version') == 'aft-run-report/v2':
             latest['content'] = self._run_markdown(latest['document'])
+        latest['current'] = self._stored_run_report_current(latest)
         return latest
 
     def close(self):

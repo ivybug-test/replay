@@ -295,6 +295,55 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(compact['records']), 1)
         self.assertEqual(compact['records'][0]['op'], 'append_step')
 
+    def test_historical_overlapping_upload_layout_is_recovered(self):
+        # Historical uploaders republished a dependency-ready tail: the layout is
+        # [0,3) [2,3) [4,2) over six records. Recovery must return each record
+        # once, count the two identical overlaps, and fail closed on conflicts.
+        ex = self.reader.execution(RUN, TASK)
+        records = [patch('append_desktop_frame', frame={
+            'frame_index': index, 'episode_elapsed_ms': index, 'image': {'path': f'{index}.png'}})
+            for index in range(6)]
+        chunks = []
+        for start, group in ((0, records[0:3]), (2, records[2:5]), (4, records[4:6])):
+            end = start + len(group)
+            self.store.artifact(
+                f'trajectory-tail.jsonl.chunks/{start:012d}-{end:012d}.jsonl',
+                b'\n'.join(json.dumps(entry).encode() for entry in group) + b'\n')
+            chunks.append({'start': start, 'count': len(group)})
+        meta = {'trace_format': 'atif-stream', 'stream_schema_version': STREAM_VERSION,
+                'manifest_schema_version': MANIFEST_VERSION, 'total_lines': 6,
+                'chunks': chunks, 'terminal': True}
+        live = self.replay._stream(ex, meta)
+        self.assertEqual([item['frame']['frame_index'] for item in live['records']], list(range(6)))
+        self.assertEqual(live['stream']['recovered_duplicate_records'], 2)
+        self.assertFalse(live['has_more'])
+        # A conflicting republish of an already published position is not
+        # recoverable. Published chunks are cached as immutable, so drop the
+        # cache before reading the tampered layout.
+        self.reader.cache.clear()
+        self.store.artifact('trajectory-tail.jsonl.chunks/000000000002-000000000005.jsonl',
+                            b'\n'.join(json.dumps({**entry, 'trajectory_id': 'other'}).encode()
+                                       for entry in records[2:5]) + b'\n')
+        with self.assertRaises(OssProtocolError):
+            self.replay._stream(ex, meta)
+
+    def test_unpublished_live_tail_is_not_exposed(self):
+        # total_lines below the chunk coverage marks the tail as not yet
+        # dependency-ready: those records must not reach the client.
+        ex = self.reader.execution(RUN, TASK)
+        records = [patch('append_desktop_frame', frame={
+            'frame_index': index, 'episode_elapsed_ms': index, 'image': {'path': f'{index}.png'}})
+            for index in range(2)]
+        self.store.artifact(
+            'trajectory-tail.jsonl.chunks/000000000000-000000000002.jsonl',
+            b'\n'.join(json.dumps({**entry, 'stream_sequence': index + 1}).encode()
+                       for index, entry in enumerate(records)) + b'\n')
+        meta = {'trace_format': 'atif-stream', 'stream_schema_version': STREAM_VERSION,
+                'manifest_schema_version': MANIFEST_VERSION, 'total_lines': 1,
+                'chunks': [{'start': 0, 'count': 2}], 'terminal': False}
+        live = self.replay._stream(ex, meta)
+        self.assertEqual(len(live['records']), 1)
+
     def test_overlapping_native_stream_recovers_without_retaining_update_history(self):
         ex = self.reader.execution(RUN, TASK)
         begin = patch('begin_step', step=step())
