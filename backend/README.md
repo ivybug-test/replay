@@ -4,7 +4,7 @@
 产物定位、缓存、执行索引、后台同步和轨迹解析。后端只读 OSS；任务说明、能力标签、
 难度仍由前端维护。运行时不依赖 harness 或旧 oss-replay 的代码目录。
 
-本后端服务 18768 生产前端的 `/api`（18770 迁移测试前端已停止并从单元中禁用）。
+本后端服务 18768 生产前端的 `/api`（18770 迁移测试前端与其单元已退役删除）。
 前端 Node 进程不持有 OSS 凭据，所有 `/api` 请求（含 `/api/atif-live`）都转发到此
 服务。后端监听本机 18769。
 Python 3.10+；OSS、索引和解析层使用标准库，HTTP 层使用 FastAPI/Pydantic/Uvicorn。
@@ -51,8 +51,9 @@ OSS 配置：`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_BUCKET`、
   `~/.config/systemd/user/replay-memory-guard.service.d/migration.conf` 覆盖
   `replay-18768`、`oss-replay-18767`、`replay-backend-18769` 三个单元，见
   `deploy/README-memory-guard.md`。
-- 待清理：已停止的迁移测试前端（18770）留下一条 TCP 18770 安全组入站规则；它的
-  单元文件与 `dist-migration/` 也可以删除。
+- 迁移测试已在 2026-09 退役：18770 前端、它的单元文件与 `dist-migration/`、
+  以及 `replay-backend-migration` 工作树都已删除；只剩云控制台里一条 TCP 18770
+  安全组入站规则待手工清理。
 
 ## 环境变量
 

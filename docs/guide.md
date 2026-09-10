@@ -335,7 +335,6 @@ AFT 链路：面板 `GET /api/execution-analysis` 读状态 → 无报告时可 
 |---|---|
 | `replay-18768.service` | 生产前端：`node server.mjs`，`REPLAY_HOST=0.0.0.0`、`REPLAY_PORT=18768`、`REPLAY_BACKEND_URL=http://127.0.0.1:18769`，内存上限 384M/512M |
 | `replay-backend-18769.service` | 后端：`uvicorn backend.app:create_oss_app`，工作目录 `%h/replay`、索引 `backend/var/executions.sqlite3`、`REPLAY_SYNC_INTERVAL=120`、`REPLAY_EVALUATOR_SOURCE_ROOT=%h/OSWorld-V2`，内存上限 1.5G/2G。单元用 `%h`（服务用户家目录）而不是写死用户名，所以任何位于 `~/replay` 的 checkout 都适用。**该单元名被两个工作树共用**：部署脚本安装自己所在工作树的副本，指到缺少分析模块的树会让 `/api/execution-analysis`、`/api/aft-reports`、`/api/cohort-reports` 消失 |
-| `replay-migration-18770.service` | 已退役的迁移测试前端（停止并禁用），保留作参考 |
 | `replay-memory-guard.py` + `replay-memory-guard.service` + `replay-memory-guard.timer` | 主机内存守护：每 5 秒采样，≥80% 停掉 `REPLAY_GUARD_UNITS`（本机经 drop-in 覆盖为 18768 + 18767 + 18769），低于 75% 持续 60 秒才恢复，≥85% 额外打 critical |
 | `test_memory_guard.py` | 守护决策函数的单元测试 |
 | `README-memory-guard.md` | 上述守护的操作手册 |
@@ -480,8 +479,9 @@ node tests/{hoh-state,liveRecovery,osworld,migration}.browser.mjs     # 其余�
 4. **环境舞台是推断**：容器文件系统与文件状态由轨迹里的工具调用重建，不保证与真实容器一致。
 5. **兼容接口保留**：`/api/agent-work`、`/api/model-image`、`/api/execution-state` 已无当前
    前端消费者，仅为已停止的迁移前端保留；`/api/window` 后端有实现但前端不使用。
-6. **迁移测试残留**：`replay-migration-18770.service` 已停止并禁用，遗留一条 TCP 18770
-   安全组入站规则待清理。
+6. **迁移测试已退役**：18770 前端、它的单元文件、`dist-migration/` 与
+   `replay-backend-migration` 工作树都已删除，只剩一条 TCP 18770 安全组入站规则
+   需要在云控制台手工清理。
 7. **旧服务仍在跑**：`oss-replay-18767.service` 与本仓库无关，但仍占资源并列入内存守护；
    退役它需要从守护的 `REPLAY_GUARD_UNITS` 里移除。
 
